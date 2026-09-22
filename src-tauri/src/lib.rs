@@ -23,6 +23,11 @@ fn repair_android_connection(app: AppHandle) -> AndroidDiagnostic {
 }
 
 #[tauri::command]
+fn capture_android_screen(app: AppHandle, serial: String) -> Result<String, String> {
+  android::capture_screen(&app, &serial).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn pair_wireless_android(app: AppHandle, endpoint: String, code: String) -> Result<String, String> {
   android::pair_wireless(&app, &endpoint, &code).map_err(|e| e.to_string())
 }
@@ -65,6 +70,7 @@ pub fn run() {
       detect_android_device,
       diagnose_android_connection,
       repair_android_connection,
+      capture_android_screen,
       pair_wireless_android,
       connect_wireless_android,
       check_for_update,

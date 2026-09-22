@@ -15,6 +15,7 @@ export const backend = {
   detectDevice: () => invoke<AndroidDevice | null>("detect_android_device"),
   diagnoseConnection: () => invoke<AndroidDiagnostic>("diagnose_android_connection"),
   repairConnection: () => invoke<AndroidDiagnostic>("repair_android_connection"),
+  captureScreen: (serial: string) => invoke<string>("capture_android_screen", { serial }),
   pairWireless: (endpoint: string, code: string) =>
     invoke<string>("pair_wireless_android", { endpoint, code }),
   connectWireless: (endpoint: string) =>
