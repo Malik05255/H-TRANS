@@ -42,6 +42,18 @@ export interface TransferProgress {
   detail?: string;
 }
 
+export interface UpdateInfo {
+  version: string;
+  url: string;
+  sha256: string;
+}
+
+export interface UpdateProgress {
+  percent: number;
+  stage: string;
+  detail?: string;
+}
+
 export interface BackupSummary {
   variant: "personal" | "business";
   sourceSerial: string;

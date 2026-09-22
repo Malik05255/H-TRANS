@@ -3,62 +3,155 @@ import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   ArchiveRestore,
   Cable,
+  Check,
   CheckCircle2,
+  Download,
   HardDriveDownload,
   RefreshCw,
   ShieldCheck,
   Smartphone,
-  Wrench,
-  XCircle
+  Unplug,
+  Wifi,
+  X
 } from "lucide-react";
 import iconUrl from "./assets/h-trans-icon.svg";
-import {
-  ar,
-  diagnosticText,
-  translateBackendError,
-  translateDetail,
-  translateStage
-} from "./i18n/ar";
+import { ar, diagnosticText, translateBackendError, translateDetail, translateStage } from "./i18n/ar";
 import { backend } from "./lib/backend";
 import type {
   AndroidDevice,
   AndroidDiagnostic,
   TransferProgress,
+  UpdateInfo,
+  UpdateProgress,
   WhatsAppVariant
 } from "./types";
 
-const idle: TransferProgress = { operation: "backup", percent: 0, stage: "Ready" };
+const idleProgress: TransferProgress = { operation: "backup", percent: 0, stage: "Ready" };
+const preview = new URLSearchParams(window.location.search).get("preview");
+
+function previewState() {
+  if (preview === "connected") {
+    const device: AndroidDevice = {
+      serial: "HTRANS-PREVIEW",
+      state: "connected",
+      manufacturer: "HONOR",
+      model: "HONOR 200",
+      androidVersion: "15",
+      batteryLevel: 84,
+      storageSummary: "81 GB مستخدم / 256 GB إجمالي",
+      whatsappInstalled: true,
+      whatsappBusinessInstalled: false
+    };
+    const diagnostic: AndroidDiagnostic = {
+      code: "connected",
+      adbAvailable: true,
+      adbServerRunning: true,
+      adbDeviceSeen: true,
+      adbInterfaceSeen: true,
+      adbPath: "",
+      windowsUsbSeen: true,
+      windowsDeviceName: "HONOR 200"
+    };
+    return { device, diagnostic };
+  }
+
+  const device: AndroidDevice = {
+    serial: "",
+    state: "usb_only",
+    manufacturer: "HONOR",
+    model: "HONOR 200",
+    androidVersion: "",
+    whatsappInstalled: false,
+    whatsappBusinessInstalled: false
+  };
+  const diagnostic: AndroidDiagnostic = {
+    code: "usb_seen_no_adb",
+    adbAvailable: true,
+    adbServerRunning: true,
+    adbDeviceSeen: false,
+    adbInterfaceSeen: true,
+    adbPath: "",
+    windowsUsbSeen: true,
+    windowsDeviceName: "HONOR 200"
+  };
+  return { device, diagnostic };
+}
 
 export default function App() {
   const [device, setDevice] = useState<AndroidDevice | null>(null);
   const [diagnostic, setDiagnostic] = useState<AndroidDiagnostic | null>(null);
   const [variant, setVariant] = useState<WhatsAppVariant>("personal");
-  const [progress, setProgress] = useState<TransferProgress>(idle);
+  const [progress, setProgress] = useState<TransferProgress>(idleProgress);
   const [running, setRunning] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [result, setResult] = useState("");
+  const [wirelessOpen, setWirelessOpen] = useState(false);
+  const [pairEndpoint, setPairEndpoint] = useState("");
+  const [pairCode, setPairCode] = useState("");
+  const [connectEndpoint, setConnectEndpoint] = useState("");
+  const [wirelessMessage, setWirelessMessage] = useState("");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(
+    preview === "update" ? { version: "0.5.0", url: "", sha256: "" } : null
+  );
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   const refresh = async () => {
+    if (preview) {
+      const state = previewState();
+      setDevice(state.device);
+      setDiagnostic(state.diagnostic);
+      return;
+    }
+
     try {
-      const [nextDevice, nextDiagnostic] = await Promise.all([
-        backend.detectDevice(),
-        backend.diagnoseConnection()
-      ]);
-      setDevice(nextDevice);
-      setDiagnostic(nextDiagnostic);
+      const values = await Promise.all([backend.detectDevice(), backend.diagnoseConnection()]);
+      setDevice(values[0]);
+      setDiagnostic(values[1]);
     } catch {
       setDevice(null);
       setDiagnostic(null);
     }
   };
 
-  async function repairConnection() {
-    setRepairing(true);
-    setResult("");
+  useEffect(() => {
+    document.documentElement.lang = "ar";
+    document.documentElement.dir = "rtl";
+    refresh();
 
+    if (!preview) {
+      backend.checkForUpdate().then(setUpdateInfo).catch(() => undefined);
+    }
+
+    const timer = preview ? undefined : window.setInterval(refresh, 3000);
+    let unlistenTransfer: (() => void) | undefined;
+    let unlistenUpdate: (() => void) | undefined;
+
+    backend.onProgress(setProgress).then((fn) => (unlistenTransfer = fn)).catch(() => undefined);
+    backend.onUpdateProgress(setUpdateProgress).then((fn) => (unlistenUpdate = fn)).catch(() => undefined);
+
+    return () => {
+      if (timer) window.clearInterval(timer);
+      unlistenTransfer?.();
+      unlistenUpdate?.();
+    };
+  }, []);
+
+  const connected = device?.state === "connected";
+  const usbOnly = device?.state === "usb_only";
+  const diagnosticCopy = diagnostic ? diagnosticText(diagnostic.code) : null;
+
+  const backupSupported = useMemo(
+    () => connected && !!device && (variant === "personal" ? device.whatsappInstalled : device.whatsappBusinessInstalled),
+    [connected, device, variant]
+  );
+
+  async function repairConnection() {
+    if (preview) return;
+    setRepairing(true);
+    setWirelessMessage("");
     try {
-      const nextDiagnostic = await backend.repairConnection();
-      setDiagnostic(nextDiagnostic);
+      setDiagnostic(await backend.repairConnection());
       setDevice(await backend.detectDevice());
     } catch (error) {
       setResult(translateBackendError(error));
@@ -67,37 +160,42 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    document.documentElement.lang = "ar";
-    document.documentElement.dir = "rtl";
+  async function pairWireless() {
+    setWirelessMessage("");
+    try {
+      const message = await backend.pairWireless(pairEndpoint.trim(), pairCode.trim());
+      setWirelessMessage(ar.pairSuccess + ": " + message);
+    } catch (error) {
+      setWirelessMessage(translateBackendError(error));
+    }
+  }
 
-    refresh();
-    const timer = window.setInterval(refresh, 2500);
-    let unlisten: (() => void) | undefined;
-    backend.onProgress(setProgress).then((fn) => (unlisten = fn));
+  async function connectWireless() {
+    setWirelessMessage("");
+    try {
+      const message = await backend.connectWireless(connectEndpoint.trim());
+      setWirelessMessage(ar.connectSuccess + ": " + message);
+      await refresh();
+    } catch (error) {
+      setWirelessMessage(translateBackendError(error));
+    }
+  }
 
-    return () => {
-      window.clearInterval(timer);
-      unlisten?.();
-    };
-  }, []);
-
-  const connected = device?.state === "connected";
-  const usbOnly = device?.state === "usb_only";
-  const phoneVisible = connected || usbOnly || device?.state === "unauthorized" || device?.state === "offline";
-
-  const backupSupported = useMemo(
-    () =>
-      connected &&
-      !!device &&
-      (variant === "personal" ? device.whatsappInstalled : device.whatsappBusinessInstalled),
-    [connected, device, variant]
-  );
+  async function installUpdate() {
+    if (!updateInfo || preview) return;
+    setUpdating(true);
+    try {
+      await backend.installUpdate(updateInfo);
+    } catch (error) {
+      setUpdating(false);
+      setResult("تعذر تثبيت التحديث: " + translateBackendError(error));
+    }
+  }
 
   async function doBackup() {
     const destination = await save({
       title: ar.saveBackupTitle,
-      defaultPath: `H-TRANS_${device?.model || "Android"}_${variant}.htrans`,
+      defaultPath: "H-TRANS_" + (device?.model || "Android") + "_" + variant + ".htrans",
       filters: [{ name: ar.backupFileType, extensions: ["htrans"] }]
     });
     if (!destination) return;
@@ -108,9 +206,9 @@ export default function App() {
 
     try {
       const saved = await backend.backupWhatsApp(variant, destination);
-      setResult(`${ar.backupSaved}: ${saved}`);
+      setResult(ar.backupSaved + ": " + saved);
     } catch (error) {
-      setResult(`${ar.backupFailed}: ${translateBackendError(error)}`);
+      setResult(ar.backupFailed + ": " + translateBackendError(error));
     } finally {
       setRunning(false);
     }
@@ -129,7 +227,7 @@ export default function App() {
       const sizeMb = (summary.totalBytes / 1024 / 1024).toFixed(1);
       const approved = await confirm(
         [
-          `تحتوي النسخة على ${summary.databaseCount} ملفًا لقاعدة المحادثات بحجم ${sizeMb} ميجابايت.`,
+          "النسخة تحتوي على " + summary.databaseCount + " ملف محادثات بحجم " + sizeMb + " ميجابايت.",
           "",
           ar.restoreVerifyNotice,
           ar.restoreSafetyNotice,
@@ -141,7 +239,7 @@ export default function App() {
       );
       if (!approved) return;
     } catch (error) {
-      setResult(`${ar.cannotOpenBackup}: ${translateBackendError(error)}`);
+      setResult(ar.cannotOpenBackup + ": " + translateBackendError(error));
       return;
     }
 
@@ -152,205 +250,223 @@ export default function App() {
     try {
       const outcome = await backend.restoreWhatsApp(selected, variant);
       const safety = outcome.safetyBackup
-        ? ` — ${ar.safetyBackup}: ${outcome.safetyBackup}`
-        : ` — ${ar.noSafetyNeeded}`;
-      setResult(`${ar.restoredFiles}: ${outcome.restoredFiles}.${safety} ${ar.finishWhatsAppSetup}`);
+        ? " — " + ar.safetyBackup + ": " + outcome.safetyBackup
+        : " — " + ar.noSafetyNeeded;
+      setResult(ar.restoredFiles + ": " + outcome.restoredFiles + "." + safety + " " + ar.finishWhatsAppSetup);
     } catch (error) {
-      setResult(`${ar.restoreFailed}: ${translateBackendError(error)}`);
+      setResult(ar.restoreFailed + ": " + translateBackendError(error));
     } finally {
       setRunning(false);
       refresh();
     }
   }
 
-  const statusText =
-    connected ? ar.connected :
-    usbOnly ? ar.usbConnected :
-    device?.state === "unauthorized" ? ar.unauthorized :
-    device?.state === "offline" ? ar.offline :
-    ar.waiting;
-
-  const titleText =
-    connected ? ar.phoneDetected :
-    usbOnly ? ar.phoneUsbDetected :
-    ar.connectPhone;
-
-  const diagnosticCopy = diagnostic ? diagnosticText(diagnostic.code) : null;
-  const progressStage = translateStage(progress.stage);
-  const progressDetail = translateDetail(progress.detail) || (running ? ar.doNotDisconnect : ar.ready);
-
-  const whatsappState = !connected
-    ? ar.waitingForAdb
-    : device?.whatsappInstalled
-      ? ar.detected
-      : ar.notDetected;
-
-  const businessState = !connected
-    ? ar.waitingForAdb
-    : device?.whatsappBusinessInstalled
-      ? ar.detected
-      : ar.notDetected;
-
   return (
-    <main className="shell">
-      <header>
+    <main className="app">
+      <header className="topbar">
         <div className="brand">
           <img src={iconUrl} alt={ar.appName} />
           <div>
-            <strong>{ar.appName}</strong>
+            <strong>H TRANS</strong>
             <span>{ar.tagline}</span>
           </div>
         </div>
-        <button className="ghost" onClick={refresh} disabled={running || repairing}>
-          <RefreshCw size={17} />
-          {ar.refresh}
-        </button>
+
+        <div className="header-actions">
+          {updateInfo && (
+            <button className="update-button" onClick={installUpdate} disabled={updating}>
+              <Download size={18} />
+              <span>
+                <b>{updating ? ar.updating : ar.updateAvailable}</b>
+                <small>{updating && updateProgress ? updateProgress.percent + "٪" : "v" + updateInfo.version}</small>
+              </span>
+            </button>
+          )}
+          <span className="version-chip">{ar.version} 0.4.0</span>
+        </div>
       </header>
 
-      <section className="grid">
-        <article className="panel device">
-          <div className="heading">
+      {!connected ? (
+        <section className="connection-screen">
+          <div className="connection-head">
             <div>
-              <p className="eyebrow">{ar.connectedDevice}</p>
-              <h1>{titleText}</h1>
+              <span className="section-kicker">{ar.connectedDevice}</span>
+              <h1>{usbOnly ? ar.usbDetected : ar.connectTitle}</h1>
+              <p>{usbOnly ? ar.adbRequired : ar.connectSubtitle}</p>
             </div>
-            <span className={connected ? "status on" : usbOnly ? "status usb" : "status"}>
-              {statusText}
+            <span className={usbOnly ? "state-pill usb" : "state-pill"}>
+              {usbOnly ? "USB متصل" : ar.waiting}
             </span>
           </div>
 
-          <div className="stage">
-            <div className="phone">
-              <div className="screen">
-                <Smartphone size={52} />
-                <strong>{phoneVisible ? device?.model || "Android" : ar.noPhone}</strong>
-                <span>{connected ? ar.connected : usbOnly ? ar.usbConnected : statusText}</span>
-                <small>{connected ? `Android ${device?.androidVersion}` : usbOnly ? ar.adbRequired : ar.usbHelp}</small>
+          <div className="connection-main">
+            <div className="device-hero">
+              <div className="phone-shell">
+                <div className="phone-display">
+                  {usbOnly ? <Smartphone size={58} /> : <Unplug size={54} />}
+                  <strong>{device?.model || "Android"}</strong>
+                  <span>{usbOnly ? "متصل بالكمبيوتر" : "بانتظار الهاتف"}</span>
+                </div>
               </div>
             </div>
 
-            <div className="facts">
-              {connected ? (
-                <>
-                  <Fact label={ar.serial} value={device?.serial || "—"} />
-                  <Fact label={ar.battery} value={device?.batteryLevel != null ? `${device.batteryLevel}٪` : "—"} />
-                  <Fact label={ar.storage} value={device?.storageSummary || "—"} />
-                  <Fact label={ar.mediaPolicy} value={ar.alwaysExcluded} />
-                </>
-              ) : (
-                <div className="connection-card">
-                  <div className="connection-title">
-                    <Cable size={24} />
+            <div className="setup-panel">
+              <div className="setup-status">
+                <StatusItem label={ar.usbLink} ok={!!diagnostic?.windowsUsbSeen} />
+                <StatusItem label={ar.adbEngine} ok={!!diagnostic?.adbAvailable && !!diagnostic?.adbServerRunning} />
+                <StatusItem label={ar.adbDriver} ok={!!diagnostic?.adbInterfaceSeen} />
+                <StatusItem label={ar.adbDevice} ok={!!diagnostic?.adbDeviceSeen && diagnostic?.code === "connected"} />
+              </div>
+
+              <div className="diagnostic-box">
+                <div className="diagnostic-title">
+                  <Cable size={22} />
+                  <div>
+                    <span>التشخيص</span>
+                    <strong>{diagnosticCopy?.title || ar.waiting}</strong>
+                  </div>
+                </div>
+                <p>{diagnosticCopy?.detail || ar.connectSubtitle}</p>
+                {diagnosticCopy?.steps && (
+                  <div className="steps-grid">
+                    {diagnosticCopy.steps.map((step, index) => (
+                      <div className="step" key={index}>
+                        <b>{index + 1}</b>
+                        <span>{step}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {diagnostic?.windowsDeviceName?.toUpperCase().includes("HONOR") && (
+                <div className="honor-note">
+                  <Smartphone size={20} />
+                  <div>
+                    <strong>{ar.honorTitle}</strong>
+                    <span>{ar.honorText}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="connection-actions">
+                <button className="primary action-wide" onClick={repairConnection} disabled={repairing}>
+                  <RefreshCw size={19} />
+                  {repairing ? "جارٍ الفحص..." : ar.retryConnection}
+                </button>
+                <button className="secondary action-wide" onClick={() => setWirelessOpen((value) => !value)}>
+                  <Wifi size={19} />
+                  {wirelessOpen ? ar.hideWireless : ar.showWireless}
+                </button>
+              </div>
+
+              {wirelessOpen && (
+                <div className="wireless-panel">
+                  <div className="wireless-head">
+                    <Wifi size={21} />
                     <div>
-                      <span>{ar.connectionCheck}</span>
-                      <strong>{diagnosticCopy?.title || ar.waiting}</strong>
+                      <strong>{ar.wirelessTitle}</strong>
+                      <span>{ar.wirelessSubtitle}</span>
                     </div>
                   </div>
-
-                  <p className="diagnostic-description">{diagnosticCopy?.detail || ar.usbHelp}</p>
-
-                  {diagnostic?.windowsDeviceName && (
-                    <div className="detected-usb">
-                      <span>{ar.usbDetected}</span>
-                      <strong dir="auto">{diagnostic.windowsDeviceName}</strong>
-                    </div>
-                  )}
-
-                  {diagnosticCopy?.steps && (
-                    <ol className="connection-steps">
-                      {diagnosticCopy.steps.map((step, index) => (
-                        <li key={index}>{step}</li>
-                      ))}
-                    </ol>
-                  )}
-
-                  <div className="diagnostic-flags">
-                    <Flag ok={!!diagnostic?.windowsUsbSeen} label={ar.usbLink} />
-                    <Flag ok={!!diagnostic?.adbAvailable && !!diagnostic?.adbServerRunning} label={ar.adbEngine} />
-                    <Flag ok={!!diagnostic?.adbInterfaceSeen} label={ar.adbDriver} />
-                    <Flag ok={!!diagnostic?.adbDeviceSeen && diagnostic?.code === "connected"} label={ar.adbDevice} />
+                  <div className="wireless-form">
+                    <input value={pairEndpoint} onChange={(e) => setPairEndpoint(e.target.value)} placeholder={ar.pairEndpoint} dir="ltr" />
+                    <input value={pairCode} onChange={(e) => setPairCode(e.target.value)} placeholder={ar.pairCode} dir="ltr" />
+                    <button onClick={pairWireless} disabled={!pairEndpoint || !pairCode}>{ar.pair}</button>
+                    <input className="connect-field" value={connectEndpoint} onChange={(e) => setConnectEndpoint(e.target.value)} placeholder={ar.connectEndpoint} dir="ltr" />
+                    <button onClick={connectWireless} disabled={!connectEndpoint}>{ar.connect}</button>
                   </div>
-
-                  <button className="repair" onClick={repairConnection} disabled={repairing || running}>
-                    <Wrench size={18} />
-                    {repairing ? ar.repairingConnection : ar.repairConnection}
-                  </button>
+                  {wirelessMessage && <p className="wireless-result">{wirelessMessage}</p>}
                 </div>
               )}
             </div>
           </div>
-        </article>
-
-        <article className="panel actions">
-          <p className="eyebrow">{ar.selectData}</p>
-          <h2>{ar.whatsappChats}</h2>
-          <p className="muted">{ar.chatsOnlyDescription}</p>
-
-          <div className="choices">
-            <Choice active={variant === "personal"} title={ar.whatsapp} sub={whatsappState} onClick={() => setVariant("personal")} />
-            <Choice active={variant === "business"} title={ar.whatsappBusiness} sub={businessState} onClick={() => setVariant("business")} />
-          </div>
-
-          <div className="privacy">
-            <ShieldCheck size={21} />
-            <span>{ar.localOnly}</span>
-          </div>
-
-          <div className="buttons">
-            <button className="primary" disabled={!backupSupported || running} onClick={doBackup}>
-              <HardDriveDownload size={19} />
-              {ar.backup}
-            </button>
-            <button className="secondary" disabled={!connected || running} onClick={doRestore}>
-              <ArchiveRestore size={19} />
-              {ar.restore}
-            </button>
-          </div>
-
-          <div className="progress">
-            <div className="progress-head">
-              <span>{progressStage}</span>
-              <strong>{progress.percent}٪</strong>
+        </section>
+      ) : (
+        <section className="dashboard">
+          <div className="device-strip">
+            <div className="device-id">
+              <div className="device-icon"><Smartphone size={25} /></div>
+              <div>
+                <span>{ar.phoneReady}</span>
+                <strong>{device?.model}</strong>
+              </div>
             </div>
-            <div className="track">
-              <i style={{ width: `${progress.percent}%` }} />
+            <div className="device-meta">
+              <span>{"Android " + device?.androidVersion}</span>
+              <span>{(device?.batteryLevel ?? "—") + "٪ بطارية"}</span>
+              <span>{device?.storageSummary || "التخزين غير متاح"}</span>
             </div>
-            <small>{progressDetail}</small>
+            <span className="ready-badge"><CheckCircle2 size={16} /> {ar.connectionReady}</span>
           </div>
 
-          {result && <p className="result">{result}</p>}
-        </article>
-      </section>
+          <div className="dashboard-grid">
+            <article className="action-card">
+              <div className="action-icon"><HardDriveDownload size={28} /></div>
+              <span className="section-kicker">{ar.backup}</span>
+              <h2>{ar.backupTitle}</h2>
+              <p>{ar.backupText}</p>
+
+              <div className="variant-selector">
+                <VariantButton active={variant === "personal"} title={ar.whatsapp} state={device?.whatsappInstalled ? ar.detected : ar.notDetected} onClick={() => setVariant("personal")} />
+                <VariantButton active={variant === "business"} title={ar.whatsappBusiness} state={device?.whatsappBusinessInstalled ? ar.detected : ar.notDetected} onClick={() => setVariant("business")} />
+              </div>
+
+              <div className="info-note"><ShieldCheck size={18} /> {ar.chatsOnly} {ar.localOnly}</div>
+
+              <button className="primary big-button" disabled={!backupSupported || running} onClick={doBackup}>
+                <HardDriveDownload size={20} /> {ar.backup}
+              </button>
+            </article>
+
+            <article className="action-card">
+              <div className="action-icon"><ArchiveRestore size={28} /></div>
+              <span className="section-kicker">{ar.restore}</span>
+              <h2>{ar.restoreTitle}</h2>
+              <p>{ar.restoreText}</p>
+              <div className="restore-points">
+                <span><Check size={16} /> فحص سلامة النسخة</span>
+                <span><Check size={16} /> نسخة أمان تلقائية</span>
+                <span><Check size={16} /> بدون تعديل الوسائط</span>
+              </div>
+              <button className="secondary big-button" disabled={running} onClick={doRestore}>
+                <ArchiveRestore size={20} /> {ar.restore}
+              </button>
+            </article>
+          </div>
+
+          <div className="operation-bar">
+            <div className="operation-copy">
+              <strong>{translateStage(progress.stage)}</strong>
+              <span>{translateDetail(progress.detail) || (running ? ar.doNotDisconnect : ar.ready)}</span>
+            </div>
+            <div className="operation-progress">
+              <div className="progress-line"><i style={{ width: progress.percent + "%" }} /></div>
+              <b>{progress.percent + "٪"}</b>
+            </div>
+          </div>
+
+          {result && <div className="result-banner">{result}</div>}
+        </section>
+      )}
     </main>
   );
 }
 
-function Flag({ ok, label }: { ok: boolean; label: string }) {
+function StatusItem({ label, ok }: { label: string; ok: boolean }) {
   return (
-    <span className={ok ? "diag-chip ok" : "diag-chip bad"}>
-      {ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-      {label}
-    </span>
-  );
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="fact">
+    <div className={ok ? "status-item ok" : "status-item"}>
+      <span className="status-dot">{ok ? <Check size={15} /> : <X size={15} />}</span>
       <span>{label}</span>
-      <strong dir="auto">{value}</strong>
     </div>
   );
 }
 
-function Choice({ active, title, sub, onClick }: { active: boolean; title: string; sub: string; onClick: () => void }) {
+function VariantButton({ active, title, state, onClick }: { active: boolean; title: string; state: string; onClick: () => void }) {
   return (
-    <button className={active ? "choice active" : "choice"} onClick={onClick}>
-      <b>{active ? "✓" : ""}</b>
-      <span>
-        <strong>{title}</strong>
-        <small>{sub}</small>
-      </span>
+    <button className={active ? "variant active" : "variant"} onClick={onClick}>
+      <span className="variant-check">{active ? <Check size={16} /> : null}</span>
+      <span><strong>{title}</strong><small>{state}</small></span>
     </button>
   );
 }

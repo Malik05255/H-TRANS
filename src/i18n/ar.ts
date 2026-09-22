@@ -2,111 +2,111 @@ import type { AndroidDiagnosticCode } from "../types";
 
 export const ar = {
   appName: "H TRANS",
-  tagline: "محادثاتك على جهازك",
-  refresh: "تحديث",
-  repairConnection: "إعادة فحص وإصلاح الاتصال",
-  repairingConnection: "جارٍ إعادة تشغيل الاتصال...",
-  connectedDevice: "الجهاز المتصل",
-  phoneDetected: "تم التعرف على هاتف Android",
-  phoneUsbDetected: "تم التعرف على الهاتف عبر USB",
-  connectPhone: "قم بتوصيل هاتف Android",
-  connected: "متصل",
-  usbConnected: "متصل عبر USB",
-  adbRequired: "يلزم تفعيل اتصال ADB لإكمال النسخ والاستعادة",
-  waiting: "بانتظار الاتصال",
-  unauthorized: "بانتظار سماح تصحيح USB من الهاتف",
-  offline: "اتصال ADB غير مستقر",
-  authorizationRequired: "الهاتف بانتظار موافقتك",
-  noPhone: "لا يوجد هاتف متصل",
-  usbHelp: "قم بتوصيل كابل بيانات وافتح قفل الهاتف.",
-  usbAuthorizeHelp: "افتح الهاتف ووافق على رسالة «السماح بتصحيح USB» ثم اختر السماح دائمًا لهذا الكمبيوتر.",
-  connectionCheck: "حالة الاتصال",
-  usbDetected: "الهاتف الذي رصده Windows",
-  adbEngine: "محرك ADB",
-  adbDevice: "جهاز ADB",
-  adbDriver: "واجهة ADB",
+  tagline: "نسخ واستعادة محادثات واتساب",
+  version: "الإصدار",
+  updateAvailable: "تحديث متاح",
+  updating: "جارٍ تحميل التحديث",
+  connectedDevice: "الهاتف",
+  phoneReady: "الهاتف جاهز",
+  usbDetected: "تم اكتشاف الهاتف عبر USB",
+  adbRequired: "المتبقي فقط تفعيل اتصال ADB",
+  connectTitle: "ربط الهاتف بـ H TRANS",
+  connectSubtitle: "لن تظهر خيارات النسخ والاستعادة حتى يصبح اتصال Android جاهزًا بالكامل.",
   usbLink: "اتصال USB",
-  serial: "الرقم التسلسلي",
-  battery: "البطارية",
-  storage: "التخزين",
-  mediaPolicy: "الوسائط",
-  alwaysExcluded: "مستبعدة دائمًا",
-  selectData: "اختر البيانات",
-  whatsappChats: "محادثات واتساب",
-  chatsOnlyDescription: "يتم نسخ المحادثات فقط، بدون الصور والفيديو والصوت والمستندات.",
+  adbEngine: "محرك ADB",
+  adbDriver: "تعريف ADB",
+  adbDevice: "جهاز ADB",
+  honorTitle: "إعداد HONOR",
+  honorText: "في هواتف HONOR فعّل USB debugging، وفعّل أيضًا السماح بتصحيح ADB في وضع الشحن فقط إن كان الخيار موجودًا.",
+  connectionReady: "جاهز",
+  waiting: "غير جاهز",
+  retryConnection: "إعادة تشغيل ADB وفحص الهاتف",
+  wirelessTitle: "حل بديل بدون تعريف USB",
+  wirelessSubtitle: "استخدم «التصحيح اللاسلكي» من خيارات المطور. هذا يتجاوز مشكلة تعريف ADB عبر الكابل.",
+  showWireless: "استخدام التصحيح اللاسلكي",
+  hideWireless: "إخفاء الاتصال اللاسلكي",
+  pairEndpoint: "عنوان الاقتران IP:PORT",
+  pairCode: "رمز الاقتران",
+  connectEndpoint: "عنوان الاتصال IP:PORT",
+  pair: "اقتران",
+  connect: "اتصال",
+  pairSuccess: "تم الاقتران بنجاح",
+  connectSuccess: "تم الاتصال اللاسلكي بنجاح",
   whatsapp: "واتساب",
   whatsappBusiness: "واتساب للأعمال",
-  detected: "تم الاكتشاف",
-  notDetected: "غير مكتشف",
-  waitingForAdb: "بانتظار تفعيل ADB",
-  localOnly: "محلي 100٪ — لا يتم رفع المحادثات إلى أي خادم.",
+  chatsOnly: "المحادثات فقط — الوسائط مستبعدة.",
   backup: "نسخ احتياطي",
   restore: "استعادة",
+  backupTitle: "إنشاء نسخة احتياطية",
+  backupText: "يحفظ H TRANS قواعد المحادثات المشفرة فقط على الكمبيوتر.",
+  restoreTitle: "استعادة نسخة",
+  restoreText: "اختر ملف H TRANS وسيتم التحقق منه وإنشاء نسخة أمان قبل الاستعادة.",
   ready: "جاهز",
-  startingBackup: "بدء النسخ الاحتياطي",
-  startingRestore: "بدء الاستعادة",
   doNotDisconnect: "لا تفصل الهاتف أثناء العملية.",
+  localOnly: "كل البيانات تبقى على هذا الكمبيوتر.",
+  detected: "تم الاكتشاف",
+  notDetected: "غير مثبت",
   saveBackupTitle: "اختر مكان حفظ نسخة H TRANS",
   backupFileType: "نسخة H TRANS",
   selectBackupTitle: "اختر نسخة H TRANS للاستعادة",
-  restoreDialogTitle: "استعادة H TRANS",
-  restoreContinue: "هل تريد المتابعة؟",
+  restoreDialogTitle: "تأكيد الاستعادة",
+  restoreContinue: "متابعة الاستعادة؟",
   restoreMediaNotice: "لن يتم تعديل الصور أو الفيديو أو الصوت أو المستندات.",
   restoreVerifyNotice: "سيتم التحقق من سلامة جميع ملفات المحادثات قبل الاستعادة.",
-  restoreSafetyNotice: "إذا كان واتساب مثبتًا، سينشئ H TRANS نسخة أمان من النسخة المحلية الحالية قبل استبدال ملفات المحادثات.",
-  cannotOpenBackup: "تعذر فتح النسخة الاحتياطية",
+  restoreSafetyNotice: "سينشئ H TRANS نسخة أمان من النسخة المحلية الحالية قبل أي استبدال.",
+  cannotOpenBackup: "تعذر فتح النسخة",
   backupFailed: "فشل النسخ الاحتياطي",
   restoreFailed: "فشلت الاستعادة",
-  backupSaved: "تم التحقق من النسخة وحفظها",
-  restoredFiles: "تمت استعادة ملفات قاعدة المحادثات",
+  backupSaved: "تم حفظ النسخة بنجاح",
+  restoredFiles: "تمت استعادة ملفات المحادثات",
   safetyBackup: "نسخة الأمان",
-  noSafetyNeeded: "لم تكن هناك حاجة لنسخة أمان لأن واتساب غير مثبت حاليًا.",
-  finishWhatsAppSetup: "أكمل إعداد واتساب واختر النسخة المحلية عندما تظهر لك شاشة الاستعادة."
+  noSafetyNeeded: "لم تكن هناك حاجة إلى نسخة أمان.",
+  finishWhatsAppSetup: "أكمل إعداد واتساب واختر النسخة المحلية عندما تظهر شاشة الاستعادة."
 } as const;
 
 const diagnosticMap: Record<AndroidDiagnosticCode, { title: string; detail: string; steps?: string[] }> = {
   connected: {
     title: "الهاتف جاهز",
-    detail: "تم إنشاء اتصال ADB كامل مع الهاتف."
+    detail: "تم إنشاء اتصال ADB كامل ويمكن لـ H TRANS تنفيذ النسخ والاستعادة."
   },
   unauthorized: {
-    title: "الهاتف ظاهر في ADB وينتظر السماح",
-    detail: "اتصال USB وADB يعملان، لكن الهاتف لم يمنح هذا الكمبيوتر الإذن بعد.",
+    title: "بانتظار موافقة الهاتف",
+    detail: "ADB يرى الهاتف لكن يحتاج موافقتك على بصمة RSA.",
     steps: [
       "افتح قفل الهاتف.",
-      "ابحث عن نافذة «السماح بتصحيح USB».",
-      "فعّل «السماح دائمًا من هذا الكمبيوتر» ثم اضغط «سماح»."
+      "اختر «السماح دائمًا من هذا الكمبيوتر».",
+      "اضغط «سماح» ثم أعد الفحص."
     ]
   },
   offline: {
-    title: "الهاتف ظاهر لكن اتصال ADB غير مستقر",
-    detail: "أعد توصيل الكابل ثم استخدم زر إعادة فحص وإصلاح الاتصال."
+    title: "اتصال ADB غير مستقر",
+    detail: "أعد توصيل الكابل ثم استخدم زر إعادة تشغيل ADB."
   },
   usb_seen_no_adb: {
-    title: "الهاتف متصل عبر USB لكن قناة ADB غير مفعلة",
-    detail: "H TRANS تعرّف على الهاتف من Windows. المتبقي هو تفعيل اتصال المطور الذي يسمح للبرنامج بالتواصل مع Android.",
+    title: "USB يعمل لكن الهاتف غير ظاهر في ADB",
+    detail: "Windows يرى الهاتف، لكن Android لم يفتح قناة المطور بعد.",
     steps: [
-      "في الهاتف اختر وضع USB «نقل الملفات» بدل «شحن فقط».",
-      "فعّل «خيارات المطور» ثم فعّل «تصحيح USB».",
-      "افصل الكابل وأعد توصيله إذا لم تظهر رسالة السماح.",
-      "عند ظهور بصمة RSA اختر «السماح دائمًا من هذا الكمبيوتر» ثم «سماح»."
+      "افتح الإعدادات > حول الهاتف واضغط رقم الإصدار 7 مرات.",
+      "افتح النظام والتحديثات > خيارات المطور > فعّل تصحيح USB.",
+      "في HONOR فعّل «السماح بتصحيح ADB في وضع الشحن فقط» إن ظهر الخيار.",
+      "افصل الكابل وأعد توصيله ثم وافق على بصمة RSA."
     ]
   },
   no_usb_device: {
-    title: "Windows لا يرى هاتف Android",
-    detail: "جرّب كابل بيانات ومنفذ USB آخر وافتح قفل الهاتف قبل إعادة الفحص."
+    title: "لم يتم اكتشاف هاتف عبر USB",
+    detail: "استخدم كابل بيانات وافتح قفل الهاتف ثم جرّب منفذ USB آخر."
   },
   adb_unavailable: {
-    title: "تعذر تشغيل محرك ADB",
-    detail: "نسخة H TRANS الحالية لا تستطيع تشغيل Android Platform Tools."
+    title: "محرك ADB غير متاح",
+    detail: "تعذر تشغيل Android Platform Tools المرفقة مع H TRANS."
   },
   adb_start_failed: {
     title: "تعذر بدء خدمة ADB",
-    detail: "قد يكون برنامج آخر يستخدم ADB. أغلق برامج إدارة الهواتف ثم أعد الفحص."
+    detail: "أغلق برامج إدارة الهواتف الأخرى ثم أعد الفحص."
   },
   adb_error: {
-    title: "تعذر فحص ADB",
-    detail: "أعد توصيل الهاتف ثم استخدم زر إعادة فحص وإصلاح الاتصال."
+    title: "خطأ في فحص Android",
+    detail: "أعد تشغيل الاتصال أو استخدم التصحيح اللاسلكي."
   }
 };
 
@@ -116,22 +116,22 @@ export function diagnosticText(code: AndroidDiagnosticCode) {
 
 const stageMap: Record<string, string> = {
   Ready: ar.ready,
-  "Starting backup": ar.startingBackup,
-  "Starting restore": ar.startingRestore,
+  "Starting backup": "بدء النسخ الاحتياطي",
+  "Starting restore": "بدء الاستعادة",
   "Checking device": "التحقق من الهاتف",
-  "Copying encrypted chat data": "نسخ بيانات المحادثات المشفرة",
-  "Creating H TRANS backup": "إنشاء نسخة H TRANS",
+  "Copying encrypted chat data": "نسخ بيانات المحادثات",
+  "Creating H TRANS backup": "إنشاء ملف H TRANS",
   "Backup complete": "اكتمل النسخ الاحتياطي",
   "Creating Safety Backup": "إنشاء نسخة أمان",
   "Verifying Safety Backup": "التحقق من نسخة الأمان",
   "Safety Backup verified": "تم التحقق من نسخة الأمان",
-  "Fresh restore mode": "تجهيز الاستعادة الجديدة",
-  "Validating H TRANS backup": "التحقق من نسخة H TRANS",
-  "Extracting verified chat databases": "استخراج قواعد المحادثات بعد التحقق",
-  "Preparing local backup folder": "تجهيز مجلد النسخة المحلية",
-  "Restoring chat database": "استعادة قاعدة المحادثات",
-  "Verifying restored files on phone": "التحقق من الملفات على الهاتف",
-  "Restore files ready": "اكتملت ملفات الاستعادة"
+  "Fresh restore mode": "تجهيز الاستعادة",
+  "Validating H TRANS backup": "التحقق من النسخة",
+  "Extracting verified chat databases": "استخراج ملفات المحادثات",
+  "Preparing local backup folder": "تجهيز مجلد الاستعادة",
+  "Restoring chat database": "استعادة المحادثات",
+  "Verifying restored files on phone": "التحقق من الهاتف",
+  "Restore files ready": "اكتملت الاستعادة"
 };
 
 export function translateStage(stage: string): string {
@@ -140,45 +140,22 @@ export function translateStage(stage: string): string {
 
 export function translateDetail(detail?: string): string | undefined {
   if (!detail) return undefined;
-
-  const exact: Record<string, string> = {
-    "Media is excluded": "الوسائط مستبعدة",
-    "Copying current local WhatsApp chat backups before any changes":
-      "يتم حفظ نسخة أمان من محادثات واتساب الحالية قبل أي تغيير",
-    "No existing WhatsApp installation detected; Safety Backup is not required":
-      "لم يتم اكتشاف واتساب مثبت، لذلك لا يلزم إنشاء نسخة أمان",
-    "Checking every embedded chat database checksum":
-      "يتم التحقق من سلامة كل ملف محادثات داخل النسخة",
-    "Only msgstore database files are replaced. Media is untouched.":
-      "سيتم استبدال ملفات المحادثات فقط، ولن يتم لمس الوسائط.",
-    "H TRANS has restored the encrypted local chat backups. Complete WhatsApp setup and select the local backup when prompted.":
-      ar.finishWhatsAppSetup
-  };
-
-  if (exact[detail]) return exact[detail];
-
   const bytes = detail.match(/^(\d+) \/ (\d+) bytes$/);
-  if (bytes) return `${bytes[1]} / ${bytes[2]} بايت`;
-
+  if (bytes) return bytes[1] + " / " + bytes[2] + " بايت";
   return detail;
 }
 
 export function translateBackendError(error: unknown): string {
   const raw = String(error);
   const replacements: Array<[string, string]> = [
-    ["No authorized Android device is connected.", "لا يوجد هاتف Android متصل ومصرح له."],
-    ["No local WhatsApp chat backup was found on the phone.", "لم يتم العثور على نسخة محلية لمحادثات واتساب على الهاتف."],
-    ["H TRANS cannot safely restore over an existing WhatsApp installation because no current local msgstore backup was found. Create a WhatsApp backup first, then retry.", "لا يمكن تنفيذ الاستعادة بأمان لأن واتساب مثبت ولا توجد نسخة محلية حالية يمكن حفظها كنسخة أمان. أنشئ نسخة محلية من داخل واتساب ثم أعد المحاولة."],
-    ["ADB is not available. Use an official H TRANS build or set HTRANS_ADB to adb.exe.", "تعذر تشغيل ADB. استخدم نسخة H TRANS الرسمية التي تتضمن ADB."],
-    ["Unsupported WhatsApp variant:", "نوع واتساب غير مدعوم:"],
-    ["Invalid or damaged H TRANS backup:", "نسخة H TRANS غير صالحة أو تالفة:"],
-    ["ADB error:", "خطأ ADB:"],
-    ["Path error:", "خطأ في المسار:"]
+    ["No authorized Android device is connected.", "لا يوجد هاتف Android جاهز للاتصال."],
+    ["No local WhatsApp chat backup was found on the phone.", "لم يتم العثور على نسخة محلية لمحادثات واتساب."],
+    ["ADB is not available.", "تعذر تشغيل ADB."],
+    ["Invalid or damaged H TRANS backup:", "نسخة H TRANS تالفة أو غير صالحة:"],
+    ["ADB error:", "خطأ ADB:"]
   ];
 
   let translated = raw;
-  for (const [from, to] of replacements) {
-    translated = translated.replace(from, to);
-  }
+  for (const [from, to] of replacements) translated = translated.replace(from, to);
   return translated;
 }

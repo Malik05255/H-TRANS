@@ -1,0 +1,43 @@
+name: UI Preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Build web UI
+        run: npm run build
+      - name: Install Chromium
+        run: npx --yes playwright@1.55.0 install --with-deps chromium
+      - name: Start preview server
+        run: |
+          nohup npm run preview -- --host 127.0.0.1 > /tmp/htrans-vite.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/htrans-vite.log
+          exit 1
+      - name: Capture USB state
+        run: npx --yes playwright@1.55.0 screenshot --viewport-size="1440,900" "http://127.0.0.1:4173/?preview=usb" H-TRANS-USB.png
+      - name: Capture connected state
+        run: npx --yes playwright@1.55.0 screenshot --viewport-size="1440,900" "http://127.0.0.1:4173/?preview=connected" H-TRANS-CONNECTED.png
+      - name: Capture update state
+        run: npx --yes playwright@1.55.0 screenshot --viewport-size="1440,900" "http://127.0.0.1:4173/?preview=update" H-TRANS-UPDATE.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: H-TRANS-UI-Preview
+          path: |
+            H-TRANS-USB.png
+            H-TRANS-CONNECTED.png
+            H-TRANS-UPDATE.png

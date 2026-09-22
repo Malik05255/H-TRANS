@@ -111,6 +111,38 @@ pub fn start_adb_server(app: &AppHandle) -> Result<(), AndroidError> {
   }
 }
 
+pub fn pair_wireless(app: &AppHandle, endpoint: &str, code: &str) -> Result<String, AndroidError> {
+  if endpoint.trim().is_empty() || code.trim().is_empty() {
+    return Err(AndroidError::CommandFailed("Pairing endpoint and code are required.".into()));
+  }
+
+  let output = raw_adb(app, &["pair", endpoint.trim(), code.trim()])?;
+  let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+  let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+  if output.status.success() && stdout.to_ascii_lowercase().contains("success") {
+    Ok(stdout)
+  } else {
+    Err(AndroidError::CommandFailed(if stderr.is_empty() { stdout } else { stderr }))
+  }
+}
+
+pub fn connect_wireless(app: &AppHandle, endpoint: &str) -> Result<String, AndroidError> {
+  if endpoint.trim().is_empty() {
+    return Err(AndroidError::CommandFailed("Wireless endpoint is required.".into()));
+  }
+
+  let output = raw_adb(app, &["connect", endpoint.trim()])?;
+  let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+  let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+  if output.status.success() && !stdout.to_ascii_lowercase().contains("failed") {
+    Ok(stdout)
+  } else {
+    Err(AndroidError::CommandFailed(if stderr.is_empty() { stdout } else { stderr }))
+  }
+}
+
 fn text(app: &AppHandle, serial: &str, args: &[&str]) -> Result<String, AndroidError> {
   let mut all = vec!["-s", serial];
   all.extend_from_slice(args);

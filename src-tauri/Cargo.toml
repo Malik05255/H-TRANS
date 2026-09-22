@@ -1,6 +1,6 @@
 [package]
 name = "h-trans"
-version = "0.3.0"
+version = "0.4.0"
 description = "H TRANS Windows Android chat backup and restore"
 authors = ["H TRANS"]
 edition = "2021"
@@ -22,3 +22,5 @@ sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tempfile = "3"
 thiserror = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+semver = "1"

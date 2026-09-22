@@ -1,0 +1,90 @@
+name: Publish Update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          "version=$($pkg.version)" >> $env:GITHUB_OUTPUT
+          "tag=v$($pkg.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Check existing release
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ steps.version.outputs.tag }}" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - uses: actions/setup-node@v4
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.existing.outputs.exists != 'true'
+
+      - name: Download official Android Platform Tools
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\platform-tools.zip"
+          $extract = "$env:RUNNER_TEMP\platform-tools"
+          Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          New-Item -ItemType Directory -Force "src-tauri\resources\platform-tools" | Out-Null
+          Copy-Item "$extract\platform-tools\adb.exe" "src-tauri\resources\platform-tools\adb.exe" -Force
+          Copy-Item "$extract\platform-tools\AdbWinApi.dll" "src-tauri\resources\platform-tools\AdbWinApi.dll" -Force
+          Copy-Item "$extract\platform-tools\AdbWinUsbApi.dll" "src-tauri\resources\platform-tools\AdbWinUsbApi.dll" -Force
+
+      - name: Install dependencies
+        if: steps.existing.outputs.exists != 'true'
+        run: npm install
+
+      - name: Build installer
+        if: steps.existing.outputs.exists != 'true'
+        run: npm run tauri build
+
+      - name: Prepare release files
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          New-Item -ItemType Directory -Force "release" | Out-Null
+          $source = Get-ChildItem "src-tauri\target\release\bundle\nsis\*.exe" | Select-Object -First 1
+          $installer = "H-TRANS-$version-x64-setup.exe"
+          Copy-Item $source.FullName "release\$installer" -Force
+          $sha = (Get-FileHash "release\$installer" -Algorithm SHA256).Hash.ToLower()
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$version/$installer"
+          $json = @{
+            version = $version
+            url = $url
+            sha256 = $sha
+          } | ConvertTo-Json
+          Set-Content -Path "release\latest.json" -Value $json -Encoding utf8
+
+      - name: Publish GitHub release
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.version.outputs.tag }}" "release\H-TRANS-${{ steps.version.outputs.version }}-x64-setup.exe" "release\latest.json" --target "${{ github.sha }}" --title "H TRANS ${{ steps.version.outputs.version }}" --notes "نسخة H TRANS ${{ steps.version.outputs.version }} لنظام Windows."
