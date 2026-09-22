@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use std::{
   ffi::OsStr,
@@ -183,31 +182,6 @@ pub fn stop_adb_server(app: &AppHandle) {
   let _ = raw_adb(app, &["kill-server"]);
 }
 
-pub fn capture_screen(app: &AppHandle, serial: &str) -> Result<String, AndroidError> {
-  if serial.trim().is_empty() {
-    return Err(AndroidError::CommandFailed("Android serial is required.".into()));
-  }
-
-  let output = hidden_command(adb_path(app))
-    .args(["-s", serial.trim(), "exec-out", "screencap", "-p"])
-    .output()
-    .map_err(|_| AndroidError::AdbUnavailable)?;
-
-  if !output.status.success() {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    return Err(AndroidError::CommandFailed(if stderr.is_empty() {
-      "Unable to capture the Android screen.".into()
-    } else {
-      stderr
-    }));
-  }
-
-  if output.stdout.len() < 8 || !output.stdout.starts_with(&[137, 80, 78, 71]) {
-    return Err(AndroidError::CommandFailed("Invalid Android screen image.".into()));
-  }
-
-  Ok(format!("data:image/png;base64,{}", STANDARD.encode(output.stdout)))
-}
 
 pub fn pair_wireless(app: &AppHandle, endpoint: &str, code: &str) -> Result<String, AndroidError> {
   if endpoint.trim().is_empty() || code.trim().is_empty() {
