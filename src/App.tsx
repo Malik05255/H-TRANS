@@ -309,7 +309,7 @@ export default function App() {
               </span>
             </button>
           )}
-          <span className="version-chip">{ar.version} 0.4.2</span>
+          <span className="version-chip">{ar.version} 0.4.3</span>
         </div>
       </header>
 
