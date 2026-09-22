@@ -36,10 +36,21 @@ pub struct AndroidDiagnostic {
   pub code: String,
   pub adb_available: bool,
   pub adb_server_running: bool,
+  pub adb_device_seen: bool,
+  pub adb_interface_seen: bool,
   pub adb_path: String,
   pub windows_usb_seen: bool,
   pub windows_device_name: Option<String>,
+  pub windows_device_status: Option<String>,
   pub raw_adb: Option<String>
+}
+
+#[derive(Debug, Clone)]
+struct WindowsPhoneProbe {
+  usb_seen: bool,
+  device_name: Option<String>,
+  device_status: Option<String>,
+  adb_interface_seen: bool
 }
 
 pub fn adb_path(app: &AppHandle) -> PathBuf {
@@ -125,16 +136,21 @@ fn parse_devices(stdout: &str) -> Vec<(String, String)> {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_phone_probe() -> (bool, Option<String>) {
+fn windows_phone_probe() -> WindowsPhoneProbe {
   let script = r#"
 $patterns = 'Android|ADB|MTP|Samsung|Galaxy|Pixel|Xiaomi|Redmi|POCO|OnePlus|OPPO|vivo|HONOR|HUAWEI|Motorola|realme|Nothing'
 $items = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
   Where-Object {
     $_.FriendlyName -and
-    ($_.FriendlyName -match $patterns -or $_.Class -eq 'AndroidUsbDeviceClass')
-  } |
-  Select-Object -ExpandProperty FriendlyName
-$items | Select-Object -First 5
+    ($_.FriendlyName -match $patterns -or $_.Class -eq 'AndroidUsbDeviceClass' -or $_.Class -eq 'WPD')
+  }
+
+foreach ($item in $items) {
+  $name = [string]$item.FriendlyName
+  $class = [string]$item.Class
+  $status = [string]$item.Status
+  Write-Output ($name + '|' + $class + '|' + $status)
+}
 "#;
 
   let output = Command::new("powershell")
@@ -142,151 +158,221 @@ $items | Select-Object -First 5
     .output();
 
   let Ok(output) = output else {
-    return (false, None);
+    return WindowsPhoneProbe {
+      usb_seen: false,
+      device_name: None,
+      device_status: None,
+      adb_interface_seen: false
+    };
   };
 
-  let names = String::from_utf8_lossy(&output.stdout);
-  let first = names
-    .lines()
-    .map(str::trim)
-    .find(|line| !line.is_empty())
-    .map(str::to_string);
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  let mut usb_seen = false;
+  let mut device_name: Option<String> = None;
+  let mut device_status: Option<String> = None;
+  let mut adb_interface_seen = false;
 
-  (first.is_some(), first)
+  for line in stdout.lines() {
+    let parts: Vec<&str> = line.split('|').collect();
+    if parts.is_empty() {
+      continue;
+    }
+
+    let name = parts.get(0).copied().unwrap_or("").trim();
+    let class = parts.get(1).copied().unwrap_or("").trim();
+    let status = parts.get(2).copied().unwrap_or("").trim();
+
+    if name.is_empty() {
+      continue;
+    }
+
+    usb_seen = true;
+
+    let lower_name = name.to_ascii_lowercase();
+    let lower_class = class.to_ascii_lowercase();
+    if lower_name.contains("adb") || lower_class.contains("androidusbdeviceclass") {
+      adb_interface_seen = true;
+    }
+
+    let is_generic = lower_name.contains("adb")
+      || lower_name.contains("mtp")
+      || lower_name.contains("android composite")
+      || lower_name.contains("android device");
+
+    if device_name.is_none() || !is_generic {
+      device_name = Some(name.to_string());
+      device_status = if status.is_empty() { None } else { Some(status.to_string()) };
+    }
+  }
+
+  WindowsPhoneProbe {
+    usb_seen,
+    device_name,
+    device_status,
+    adb_interface_seen
+  }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn windows_phone_probe() -> (bool, Option<String>) {
-  (false, None)
+fn windows_phone_probe() -> WindowsPhoneProbe {
+  WindowsPhoneProbe {
+    usb_seen: false,
+    device_name: None,
+    device_status: None,
+    adb_interface_seen: false
+  }
+}
+
+fn diagnostic(
+  code: &str,
+  adb_available: bool,
+  adb_server_running: bool,
+  adb_device_seen: bool,
+  adb_path_text: String,
+  probe: WindowsPhoneProbe,
+  raw_adb: Option<String>
+) -> AndroidDiagnostic {
+  AndroidDiagnostic {
+    code: code.into(),
+    adb_available,
+    adb_server_running,
+    adb_device_seen,
+    adb_interface_seen: probe.adb_interface_seen,
+    adb_path: adb_path_text,
+    windows_usb_seen: probe.usb_seen,
+    windows_device_name: probe.device_name,
+    windows_device_status: probe.device_status,
+    raw_adb
+  }
 }
 
 pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
   let path = adb_path(app);
   let adb_path_text = path.display().to_string();
+  let probe = windows_phone_probe();
 
   let version = Command::new(&path).arg("version").output();
   let Ok(version) = version else {
-    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
-    return AndroidDiagnostic {
-      code: "adb_unavailable".into(),
-      adb_available: false,
-      adb_server_running: false,
-      adb_path: adb_path_text,
-      windows_usb_seen,
-      windows_device_name,
-      raw_adb: None
-    };
+    return diagnostic(
+      "adb_unavailable",
+      false,
+      false,
+      false,
+      adb_path_text,
+      probe,
+      None
+    );
   };
 
   if !version.status.success() {
-    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
-    return AndroidDiagnostic {
-      code: "adb_unavailable".into(),
-      adb_available: false,
-      adb_server_running: false,
-      adb_path: adb_path_text,
-      windows_usb_seen,
-      windows_device_name,
-      raw_adb: Some(String::from_utf8_lossy(&version.stderr).trim().to_string())
-    };
+    return diagnostic(
+      "adb_unavailable",
+      false,
+      false,
+      false,
+      adb_path_text,
+      probe,
+      Some(String::from_utf8_lossy(&version.stderr).trim().to_string())
+    );
   }
 
   let server = Command::new(&path).arg("start-server").output();
   let server_running = server.as_ref().map(|out| out.status.success()).unwrap_or(false);
 
   if !server_running {
-    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
     let raw = server
       .ok()
       .map(|out| String::from_utf8_lossy(&out.stderr).trim().to_string());
 
-    return AndroidDiagnostic {
-      code: "adb_start_failed".into(),
-      adb_available: true,
-      adb_server_running: false,
-      adb_path: adb_path_text,
-      windows_usb_seen,
-      windows_device_name,
-      raw_adb: raw
-    };
+    return diagnostic(
+      "adb_start_failed",
+      true,
+      false,
+      false,
+      adb_path_text,
+      probe,
+      raw
+    );
   }
 
   let devices = Command::new(&path).args(["devices", "-l"]).output();
   let Ok(devices) = devices else {
-    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
-    return AndroidDiagnostic {
-      code: "adb_error".into(),
-      adb_available: true,
-      adb_server_running: true,
-      adb_path: adb_path_text,
-      windows_usb_seen,
-      windows_device_name,
-      raw_adb: None
-    };
+    return diagnostic(
+      "adb_error",
+      true,
+      true,
+      false,
+      adb_path_text,
+      probe,
+      None
+    );
   };
 
   let stdout = String::from_utf8_lossy(&devices.stdout).to_string();
   let parsed = parse_devices(&stdout);
 
   if parsed.iter().any(|(_, state)| state == "device") {
-    return AndroidDiagnostic {
-      code: "connected".into(),
-      adb_available: true,
-      adb_server_running: true,
-      adb_path: adb_path_text,
-      windows_usb_seen: true,
-      windows_device_name: None,
-      raw_adb: Some(stdout)
-    };
+    return diagnostic(
+      "connected",
+      true,
+      true,
+      true,
+      adb_path_text,
+      probe,
+      Some(stdout)
+    );
   }
 
   if parsed.iter().any(|(_, state)| state == "unauthorized") {
-    return AndroidDiagnostic {
-      code: "unauthorized".into(),
-      adb_available: true,
-      adb_server_running: true,
-      adb_path: adb_path_text,
-      windows_usb_seen: true,
-      windows_device_name: None,
-      raw_adb: Some(stdout)
-    };
+    return diagnostic(
+      "unauthorized",
+      true,
+      true,
+      true,
+      adb_path_text,
+      probe,
+      Some(stdout)
+    );
   }
 
   if parsed.iter().any(|(_, state)| state == "offline") {
-    return AndroidDiagnostic {
-      code: "offline".into(),
-      adb_available: true,
-      adb_server_running: true,
-      adb_path: adb_path_text,
-      windows_usb_seen: true,
-      windows_device_name: None,
-      raw_adb: Some(stdout)
-    };
+    return diagnostic(
+      "offline",
+      true,
+      true,
+      true,
+      adb_path_text,
+      probe,
+      Some(stdout)
+    );
   }
 
-  let (windows_usb_seen, windows_device_name) = windows_phone_probe();
-
-  AndroidDiagnostic {
-    code: if windows_usb_seen {
-      "usb_seen_no_adb".into()
-    } else {
-      "no_usb_device".into()
-    },
-    adb_available: true,
-    adb_server_running: true,
-    adb_path: adb_path_text,
-    windows_usb_seen,
-    windows_device_name,
-    raw_adb: Some(stdout)
-  }
+  diagnostic(
+    if probe.usb_seen { "usb_seen_no_adb" } else { "no_usb_device" },
+    true,
+    true,
+    false,
+    adb_path_text,
+    probe,
+    Some(stdout)
+  )
 }
 
 pub fn repair_connection(app: &AppHandle) -> AndroidDiagnostic {
   let path = adb_path(app);
+
   let _ = Command::new(&path).arg("kill-server").output();
-  thread::sleep(Duration::from_millis(350));
+  thread::sleep(Duration::from_millis(450));
+
   let _ = Command::new(&path).arg("start-server").output();
-  thread::sleep(Duration::from_millis(700));
+  thread::sleep(Duration::from_millis(600));
+
+  let _ = Command::new(&path).arg("reconnect").output();
+  thread::sleep(Duration::from_millis(350));
+
+  let _ = Command::new(&path).args(["reconnect", "offline"]).output();
+  thread::sleep(Duration::from_millis(350));
+
   diagnose_connection(app)
 }
 
@@ -304,22 +390,74 @@ pub fn detect_device(app: &AppHandle) -> Result<Option<AndroidDevice>, AndroidEr
     }
   }
 
-  let Some((serial, raw_state)) = selected else {
-    return Ok(None);
-  };
+  if let Some((serial, raw_state)) = selected {
+    if raw_state != "device" {
+      let state = if raw_state == "unauthorized" {
+        "unauthorized"
+      } else {
+        "offline"
+      };
 
-  if raw_state != "device" {
-    let state = if raw_state == "unauthorized" {
-      "unauthorized"
-    } else {
-      "offline"
-    };
+      return Ok(Some(AndroidDevice {
+        serial,
+        state: state.to_string(),
+        manufacturer: String::new(),
+        model: String::new(),
+        android_version: String::new(),
+        battery_level: None,
+        storage_summary: None,
+        whatsapp_installed: false,
+        whatsapp_business_installed: false
+      }));
+    }
+
+    let manufacturer =
+      text(app, &serial, &["shell", "getprop", "ro.product.manufacturer"]).unwrap_or_default();
+    let model = text(app, &serial, &["shell", "getprop", "ro.product.model"]).unwrap_or_default();
+    let android_version =
+      text(app, &serial, &["shell", "getprop", "ro.build.version.release"]).unwrap_or_default();
+
+    let battery_dump = text(app, &serial, &["shell", "dumpsys", "battery"]).unwrap_or_default();
+    let battery_level = battery_dump
+      .lines()
+      .find_map(|line| line.trim().strip_prefix("level:"))
+      .and_then(|value| value.trim().parse::<u8>().ok());
+
+    let storage = text(app, &serial, &["shell", "df", "-h", "/sdcard"]).unwrap_or_default();
+    let storage_summary = storage.lines().last().map(|line| {
+      let columns: Vec<&str> = line.split_whitespace().collect();
+      if columns.len() >= 5 {
+        format!("{} مستخدم / {} إجمالي", columns[2], columns[1])
+      } else {
+        line.to_string()
+      }
+    });
+
+    let packages =
+      text(app, &serial, &["shell", "pm", "list", "packages"]).unwrap_or_default();
 
     return Ok(Some(AndroidDevice {
       serial,
-      state: state.to_string(),
+      state: "connected".to_string(),
+      manufacturer,
+      model,
+      android_version,
+      battery_level,
+      storage_summary,
+      whatsapp_installed: packages.lines().any(|line| line.trim() == "package:com.whatsapp"),
+      whatsapp_business_installed: packages
+        .lines()
+        .any(|line| line.trim() == "package:com.whatsapp.w4b")
+    }));
+  }
+
+  let probe = windows_phone_probe();
+  if probe.usb_seen {
+    return Ok(Some(AndroidDevice {
+      serial: String::new(),
+      state: "usb_only".to_string(),
       manufacturer: String::new(),
-      model: String::new(),
+      model: probe.device_name.unwrap_or_else(|| "Android".to_string()),
       android_version: String::new(),
       battery_level: None,
       storage_summary: None,
@@ -328,42 +466,5 @@ pub fn detect_device(app: &AppHandle) -> Result<Option<AndroidDevice>, AndroidEr
     }));
   }
 
-  let manufacturer =
-    text(app, &serial, &["shell", "getprop", "ro.product.manufacturer"]).unwrap_or_default();
-  let model = text(app, &serial, &["shell", "getprop", "ro.product.model"]).unwrap_or_default();
-  let android_version =
-    text(app, &serial, &["shell", "getprop", "ro.build.version.release"]).unwrap_or_default();
-
-  let battery_dump = text(app, &serial, &["shell", "dumpsys", "battery"]).unwrap_or_default();
-  let battery_level = battery_dump
-    .lines()
-    .find_map(|line| line.trim().strip_prefix("level:"))
-    .and_then(|value| value.trim().parse::<u8>().ok());
-
-  let storage = text(app, &serial, &["shell", "df", "-h", "/sdcard"]).unwrap_or_default();
-  let storage_summary = storage.lines().last().map(|line| {
-    let columns: Vec<&str> = line.split_whitespace().collect();
-    if columns.len() >= 5 {
-      format!("{} مستخدم / {} إجمالي", columns[2], columns[1])
-    } else {
-      line.to_string()
-    }
-  });
-
-  let packages =
-    text(app, &serial, &["shell", "pm", "list", "packages"]).unwrap_or_default();
-
-  Ok(Some(AndroidDevice {
-    serial,
-    state: "connected".to_string(),
-    manufacturer,
-    model,
-    android_version,
-    battery_level,
-    storage_summary,
-    whatsapp_installed: packages.lines().any(|line| line.trim() == "package:com.whatsapp"),
-    whatsapp_business_installed: packages
-      .lines()
-      .any(|line| line.trim() == "package:com.whatsapp.w4b")
-  }))
+  Ok(None)
 }

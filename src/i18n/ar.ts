@@ -4,22 +4,28 @@ export const ar = {
   appName: "H TRANS",
   tagline: "محادثاتك على جهازك",
   refresh: "تحديث",
-  repairConnection: "إصلاح الاتصال",
-  repairingConnection: "جارٍ إصلاح الاتصال...",
+  repairConnection: "إعادة فحص وإصلاح الاتصال",
+  repairingConnection: "جارٍ إعادة تشغيل الاتصال...",
   connectedDevice: "الجهاز المتصل",
   phoneDetected: "تم التعرف على هاتف Android",
+  phoneUsbDetected: "تم التعرف على الهاتف عبر USB",
   connectPhone: "قم بتوصيل هاتف Android",
   connected: "متصل",
+  usbConnected: "متصل عبر USB",
+  adbRequired: "يلزم تفعيل اتصال ADB لإكمال النسخ والاستعادة",
   waiting: "بانتظار الاتصال",
-  unauthorized: "افتح الهاتف واضغط سماح لتصحيح USB",
-  offline: "أعد توصيل كابل USB",
-  authorizationRequired: "مطلوب السماح بالاتصال",
+  unauthorized: "بانتظار سماح تصحيح USB من الهاتف",
+  offline: "اتصال ADB غير مستقر",
+  authorizationRequired: "الهاتف بانتظار موافقتك",
   noPhone: "لا يوجد هاتف متصل",
-  usbHelp: "قم بتوصيل USB وتفعيل تصحيح USB.",
-  usbAuthorizeHelp: "افتح الهاتف ووافق على رسالة تصحيح USB.",
-  connectionCheck: "تشخيص الاتصال",
-  usbDetected: "تم رصد الهاتف في Windows",
-  adbReady: "محرك ADB جاهز",
+  usbHelp: "قم بتوصيل كابل بيانات وافتح قفل الهاتف.",
+  usbAuthorizeHelp: "افتح الهاتف ووافق على رسالة «السماح بتصحيح USB» ثم اختر السماح دائمًا لهذا الكمبيوتر.",
+  connectionCheck: "حالة الاتصال",
+  usbDetected: "الهاتف الذي رصده Windows",
+  adbEngine: "محرك ADB",
+  adbDevice: "جهاز ADB",
+  adbDriver: "واجهة ADB",
+  usbLink: "اتصال USB",
   serial: "الرقم التسلسلي",
   battery: "البطارية",
   storage: "التخزين",
@@ -27,12 +33,13 @@ export const ar = {
   alwaysExcluded: "مستبعدة دائمًا",
   selectData: "اختر البيانات",
   whatsappChats: "محادثات واتساب",
-  chatsOnlyDescription: "المحادثات فقط. الصور والفيديو والصوت والمستندات لا يتم تضمينها أو تعديلها.",
+  chatsOnlyDescription: "يتم نسخ المحادثات فقط، بدون الصور والفيديو والصوت والمستندات.",
   whatsapp: "واتساب",
   whatsappBusiness: "واتساب للأعمال",
   detected: "تم الاكتشاف",
   notDetected: "غير مكتشف",
-  localOnly: "محلي 100٪. لا يرفع H TRANS بيانات المحادثات إلى أي خادم.",
+  waitingForAdb: "بانتظار تفعيل ADB",
+  localOnly: "محلي 100٪ — لا يتم رفع المحادثات إلى أي خادم.",
   backup: "نسخ احتياطي",
   restore: "استعادة",
   ready: "جاهز",
@@ -57,38 +64,49 @@ export const ar = {
   finishWhatsAppSetup: "أكمل إعداد واتساب واختر النسخة المحلية عندما تظهر لك شاشة الاستعادة."
 } as const;
 
-const diagnosticMap: Record<AndroidDiagnosticCode, { title: string; detail: string }> = {
+const diagnosticMap: Record<AndroidDiagnosticCode, { title: string; detail: string; steps?: string[] }> = {
   connected: {
-    title: "الهاتف متصل وجاهز",
-    detail: "تم التعرف على الهاتف عبر ADB ويمكن لـ H TRANS التواصل معه."
+    title: "الهاتف جاهز",
+    detail: "تم إنشاء اتصال ADB كامل مع الهاتف."
   },
   unauthorized: {
-    title: "الهاتف ظاهر لكن لم يتم السماح له",
-    detail: "افتح قفل الهاتف. ستظهر رسالة السماح بتصحيح USB؛ اختر «السماح دائمًا من هذا الكمبيوتر» ثم اضغط سماح."
+    title: "الهاتف ظاهر في ADB وينتظر السماح",
+    detail: "اتصال USB وADB يعملان، لكن الهاتف لم يمنح هذا الكمبيوتر الإذن بعد.",
+    steps: [
+      "افتح قفل الهاتف.",
+      "ابحث عن نافذة «السماح بتصحيح USB».",
+      "فعّل «السماح دائمًا من هذا الكمبيوتر» ثم اضغط «سماح»."
+    ]
   },
   offline: {
-    title: "الهاتف ظاهر بحالة غير متصلة",
-    detail: "افصل كابل USB وأعد توصيله، ثم اضغط «إصلاح الاتصال»."
+    title: "الهاتف ظاهر لكن اتصال ADB غير مستقر",
+    detail: "أعد توصيل الكابل ثم استخدم زر إعادة فحص وإصلاح الاتصال."
   },
   usb_seen_no_adb: {
-    title: "Windows يرى الهاتف لكن ADB لا يراه",
-    detail: "غيّر وضع USB في الهاتف إلى «نقل الملفات»، فعّل «خيارات المطور» ثم «تصحيح USB»، ووافق على رسالة بصمة RSA. إذا استمرت المشكلة فقد يحتاج Windows إلى تعريف USB الخاص بالشركة المصنعة."
+    title: "الهاتف متصل عبر USB لكن قناة ADB غير مفعلة",
+    detail: "H TRANS تعرّف على الهاتف من Windows. المتبقي هو تفعيل اتصال المطور الذي يسمح للبرنامج بالتواصل مع Android.",
+    steps: [
+      "في الهاتف اختر وضع USB «نقل الملفات» بدل «شحن فقط».",
+      "فعّل «خيارات المطور» ثم فعّل «تصحيح USB».",
+      "افصل الكابل وأعد توصيله إذا لم تظهر رسالة السماح.",
+      "عند ظهور بصمة RSA اختر «السماح دائمًا من هذا الكمبيوتر» ثم «سماح»."
+    ]
   },
   no_usb_device: {
-    title: "لم يتم رصد هاتف Android عبر USB",
-    detail: "استخدم كابل بيانات وليس كابل شحن فقط، جرّب منفذ USB آخر، وافتح شاشة الهاتف ثم اختر «نقل الملفات» من خيارات USB."
+    title: "Windows لا يرى هاتف Android",
+    detail: "جرّب كابل بيانات ومنفذ USB آخر وافتح قفل الهاتف قبل إعادة الفحص."
   },
   adb_unavailable: {
     title: "تعذر تشغيل محرك ADB",
-    detail: "ملفات Android Platform Tools غير متاحة داخل H TRANS. ثبّت أحدث نسخة رسمية من التطبيق."
+    detail: "نسخة H TRANS الحالية لا تستطيع تشغيل Android Platform Tools."
   },
   adb_start_failed: {
-    title: "تعذر تشغيل خدمة ADB",
-    detail: "أغلق أي برنامج آخر يستخدم ADB ثم اضغط «إصلاح الاتصال»."
+    title: "تعذر بدء خدمة ADB",
+    detail: "قد يكون برنامج آخر يستخدم ADB. أغلق برامج إدارة الهواتف ثم أعد الفحص."
   },
   adb_error: {
-    title: "حدث خطأ أثناء فحص اتصال Android",
-    detail: "اضغط «إصلاح الاتصال». إذا استمرت المشكلة أعد توصيل الهاتف وافتح قفله."
+    title: "تعذر فحص ADB",
+    detail: "أعد توصيل الهاتف ثم استخدم زر إعادة فحص وإصلاح الاتصال."
   }
 };
 
@@ -147,7 +165,6 @@ export function translateDetail(detail?: string): string | undefined {
 
 export function translateBackendError(error: unknown): string {
   const raw = String(error);
-
   const replacements: Array<[string, string]> = [
     ["No authorized Android device is connected.", "لا يوجد هاتف Android متصل ومصرح له."],
     ["No local WhatsApp chat backup was found on the phone.", "لم يتم العثور على نسخة محلية لمحادثات واتساب على الهاتف."],

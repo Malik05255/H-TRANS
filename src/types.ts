@@ -1,4 +1,4 @@
-export type DeviceState = "connected" | "unauthorized" | "offline" | "none";
+export type DeviceState = "connected" | "usb_only" | "unauthorized" | "offline" | "none";
 
 export interface AndroidDevice {
   serial: string;
@@ -26,9 +26,12 @@ export interface AndroidDiagnostic {
   code: AndroidDiagnosticCode;
   adbAvailable: boolean;
   adbServerRunning: boolean;
+  adbDeviceSeen: boolean;
+  adbInterfaceSeen: boolean;
   adbPath: string;
   windowsUsbSeen: boolean;
   windowsDeviceName?: string | null;
+  windowsDeviceStatus?: string | null;
   rawAdb?: string | null;
 }
 

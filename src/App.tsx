@@ -3,12 +3,13 @@ import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   ArchiveRestore,
   Cable,
+  CheckCircle2,
   HardDriveDownload,
   RefreshCw,
   ShieldCheck,
   Smartphone,
   Wrench,
-  WifiOff
+  XCircle
 } from "lucide-react";
 import iconUrl from "./assets/h-trans-icon.svg";
 import {
@@ -39,27 +40,15 @@ export default function App() {
 
   const refresh = async () => {
     try {
-      const nextDevice = await backend.detectDevice();
+      const [nextDevice, nextDiagnostic] = await Promise.all([
+        backend.detectDevice(),
+        backend.diagnoseConnection()
+      ]);
       setDevice(nextDevice);
-
-      if (nextDevice?.state === "connected") {
-        setDiagnostic({
-          code: "connected",
-          adbAvailable: true,
-          adbServerRunning: true,
-          adbPath: "",
-          windowsUsbSeen: true
-        });
-      } else {
-        setDiagnostic(await backend.diagnoseConnection());
-      }
+      setDiagnostic(nextDiagnostic);
     } catch {
       setDevice(null);
-      try {
-        setDiagnostic(await backend.diagnoseConnection());
-      } catch {
-        setDiagnostic(null);
-      }
+      setDiagnostic(null);
     }
   };
 
@@ -70,8 +59,7 @@ export default function App() {
     try {
       const nextDiagnostic = await backend.repairConnection();
       setDiagnostic(nextDiagnostic);
-      const nextDevice = await backend.detectDevice();
-      setDevice(nextDevice);
+      setDevice(await backend.detectDevice());
     } catch (error) {
       setResult(translateBackendError(error));
     } finally {
@@ -84,7 +72,7 @@ export default function App() {
     document.documentElement.dir = "rtl";
 
     refresh();
-    const timer = window.setInterval(refresh, 2000);
+    const timer = window.setInterval(refresh, 2500);
     let unlisten: (() => void) | undefined;
     backend.onProgress(setProgress).then((fn) => (unlisten = fn));
 
@@ -95,11 +83,15 @@ export default function App() {
   }, []);
 
   const connected = device?.state === "connected";
+  const usbOnly = device?.state === "usb_only";
+  const phoneVisible = connected || usbOnly || device?.state === "unauthorized" || device?.state === "offline";
+
   const backupSupported = useMemo(
     () =>
+      connected &&
       !!device &&
       (variant === "personal" ? device.whatsappInstalled : device.whatsappBusinessInstalled),
-    [device, variant]
+    [connected, device, variant]
   );
 
   async function doBackup() {
@@ -108,7 +100,6 @@ export default function App() {
       defaultPath: `H-TRANS_${device?.model || "Android"}_${variant}.htrans`,
       filters: [{ name: ar.backupFileType, extensions: ["htrans"] }]
     });
-
     if (!destination) return;
 
     setRunning(true);
@@ -131,7 +122,6 @@ export default function App() {
       multiple: false,
       filters: [{ name: ar.backupFileType, extensions: ["htrans"] }]
     });
-
     if (!selected || Array.isArray(selected)) return;
 
     try {
@@ -149,7 +139,6 @@ export default function App() {
         ].join("\n"),
         { title: ar.restoreDialogTitle, kind: "warning" }
       );
-
       if (!approved) return;
     } catch (error) {
       setResult(`${ar.cannotOpenBackup}: ${translateBackendError(error)}`);
@@ -165,10 +154,7 @@ export default function App() {
       const safety = outcome.safetyBackup
         ? ` — ${ar.safetyBackup}: ${outcome.safetyBackup}`
         : ` — ${ar.noSafetyNeeded}`;
-
-      setResult(
-        `${ar.restoredFiles}: ${outcome.restoredFiles}.${safety} ${ar.finishWhatsAppSetup}`
-      );
+      setResult(`${ar.restoredFiles}: ${outcome.restoredFiles}.${safety} ${ar.finishWhatsAppSetup}`);
     } catch (error) {
       setResult(`${ar.restoreFailed}: ${translateBackendError(error)}`);
     } finally {
@@ -178,18 +164,32 @@ export default function App() {
   }
 
   const statusText =
-    device?.state === "unauthorized"
-      ? ar.unauthorized
-      : device?.state === "offline"
-        ? ar.offline
-        : connected
-          ? ar.connected
-          : ar.waiting;
+    connected ? ar.connected :
+    usbOnly ? ar.usbConnected :
+    device?.state === "unauthorized" ? ar.unauthorized :
+    device?.state === "offline" ? ar.offline :
+    ar.waiting;
+
+  const titleText =
+    connected ? ar.phoneDetected :
+    usbOnly ? ar.phoneUsbDetected :
+    ar.connectPhone;
 
   const diagnosticCopy = diagnostic ? diagnosticText(diagnostic.code) : null;
   const progressStage = translateStage(progress.stage);
-  const progressDetail =
-    translateDetail(progress.detail) || (running ? ar.doNotDisconnect : ar.ready);
+  const progressDetail = translateDetail(progress.detail) || (running ? ar.doNotDisconnect : ar.ready);
+
+  const whatsappState = !connected
+    ? ar.waitingForAdb
+    : device?.whatsappInstalled
+      ? ar.detected
+      : ar.notDetected;
+
+  const businessState = !connected
+    ? ar.waitingForAdb
+    : device?.whatsappBusinessInstalled
+      ? ar.detected
+      : ar.notDetected;
 
   return (
     <main className="shell">
@@ -201,9 +201,8 @@ export default function App() {
             <span>{ar.tagline}</span>
           </div>
         </div>
-
         <button className="ghost" onClick={refresh} disabled={running || repairing}>
-          <RefreshCw size={16} />
+          <RefreshCw size={17} />
           {ar.refresh}
         </button>
       </header>
@@ -213,36 +212,20 @@ export default function App() {
           <div className="heading">
             <div>
               <p className="eyebrow">{ar.connectedDevice}</p>
-              <h1>{connected ? ar.phoneDetected : ar.connectPhone}</h1>
+              <h1>{titleText}</h1>
             </div>
-            <span className={connected ? "status on" : "status"}>{statusText}</span>
+            <span className={connected ? "status on" : usbOnly ? "status usb" : "status"}>
+              {statusText}
+            </span>
           </div>
 
           <div className="stage">
             <div className="phone">
               <div className="screen">
-                {connected ? (
-                  <>
-                    <Smartphone size={40} />
-                    <strong>{device?.model}</strong>
-                    <span>{device?.manufacturer}</span>
-                    <small>Android {device?.androidVersion}</small>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff size={38} />
-                    <strong>
-                      {device?.state === "unauthorized"
-                        ? ar.authorizationRequired
-                        : diagnosticCopy?.title || ar.noPhone}
-                    </strong>
-                    <small>
-                      {device?.state === "unauthorized"
-                        ? ar.usbAuthorizeHelp
-                        : diagnosticCopy?.detail || ar.usbHelp}
-                    </small>
-                  </>
-                )}
+                <Smartphone size={52} />
+                <strong>{phoneVisible ? device?.model || "Android" : ar.noPhone}</strong>
+                <span>{connected ? ar.connected : usbOnly ? ar.usbConnected : statusText}</span>
+                <small>{connected ? `Android ${device?.androidVersion}` : usbOnly ? ar.adbRequired : ar.usbHelp}</small>
               </div>
             </div>
 
@@ -250,24 +233,21 @@ export default function App() {
               {connected ? (
                 <>
                   <Fact label={ar.serial} value={device?.serial || "—"} />
-                  <Fact
-                    label={ar.battery}
-                    value={device?.batteryLevel != null ? `${device.batteryLevel}٪` : "—"}
-                  />
+                  <Fact label={ar.battery} value={device?.batteryLevel != null ? `${device.batteryLevel}٪` : "—"} />
                   <Fact label={ar.storage} value={device?.storageSummary || "—"} />
                   <Fact label={ar.mediaPolicy} value={ar.alwaysExcluded} />
                 </>
               ) : (
                 <div className="connection-card">
                   <div className="connection-title">
-                    <Cable size={20} />
+                    <Cable size={24} />
                     <div>
                       <span>{ar.connectionCheck}</span>
                       <strong>{diagnosticCopy?.title || ar.waiting}</strong>
                     </div>
                   </div>
 
-                  <p>{diagnosticCopy?.detail || ar.usbHelp}</p>
+                  <p className="diagnostic-description">{diagnosticCopy?.detail || ar.usbHelp}</p>
 
                   {diagnostic?.windowsDeviceName && (
                     <div className="detected-usb">
@@ -276,21 +256,23 @@ export default function App() {
                     </div>
                   )}
 
+                  {diagnosticCopy?.steps && (
+                    <ol className="connection-steps">
+                      {diagnosticCopy.steps.map((step, index) => (
+                        <li key={index}>{step}</li>
+                      ))}
+                    </ol>
+                  )}
+
                   <div className="diagnostic-flags">
-                    <span className={diagnostic?.adbAvailable ? "ok" : ""}>
-                      ADB {diagnostic?.adbAvailable ? "✓" : "×"}
-                    </span>
-                    <span className={diagnostic?.windowsUsbSeen ? "ok" : ""}>
-                      USB {diagnostic?.windowsUsbSeen ? "✓" : "×"}
-                    </span>
+                    <Flag ok={!!diagnostic?.windowsUsbSeen} label={ar.usbLink} />
+                    <Flag ok={!!diagnostic?.adbAvailable && !!diagnostic?.adbServerRunning} label={ar.adbEngine} />
+                    <Flag ok={!!diagnostic?.adbInterfaceSeen} label={ar.adbDriver} />
+                    <Flag ok={!!diagnostic?.adbDeviceSeen && diagnostic?.code === "connected"} label={ar.adbDevice} />
                   </div>
 
-                  <button
-                    className="repair"
-                    onClick={repairConnection}
-                    disabled={repairing || running}
-                  >
-                    <Wrench size={17} />
+                  <button className="repair" onClick={repairConnection} disabled={repairing || running}>
+                    <Wrench size={18} />
                     {repairing ? ar.repairingConnection : ar.repairConnection}
                   </button>
                 </div>
@@ -305,41 +287,22 @@ export default function App() {
           <p className="muted">{ar.chatsOnlyDescription}</p>
 
           <div className="choices">
-            <Choice
-              active={variant === "personal"}
-              title={ar.whatsapp}
-              sub={device?.whatsappInstalled ? ar.detected : ar.notDetected}
-              onClick={() => setVariant("personal")}
-            />
-            <Choice
-              active={variant === "business"}
-              title={ar.whatsappBusiness}
-              sub={device?.whatsappBusinessInstalled ? ar.detected : ar.notDetected}
-              onClick={() => setVariant("business")}
-            />
+            <Choice active={variant === "personal"} title={ar.whatsapp} sub={whatsappState} onClick={() => setVariant("personal")} />
+            <Choice active={variant === "business"} title={ar.whatsappBusiness} sub={businessState} onClick={() => setVariant("business")} />
           </div>
 
           <div className="privacy">
-            <ShieldCheck size={19} />
+            <ShieldCheck size={21} />
             <span>{ar.localOnly}</span>
           </div>
 
           <div className="buttons">
-            <button
-              className="primary"
-              disabled={!connected || !backupSupported || running}
-              onClick={doBackup}
-            >
-              <HardDriveDownload size={18} />
+            <button className="primary" disabled={!backupSupported || running} onClick={doBackup}>
+              <HardDriveDownload size={19} />
               {ar.backup}
             </button>
-
-            <button
-              className="secondary"
-              disabled={!connected || running}
-              onClick={doRestore}
-            >
-              <ArchiveRestore size={18} />
+            <button className="secondary" disabled={!connected || running} onClick={doRestore}>
+              <ArchiveRestore size={19} />
               {ar.restore}
             </button>
           </div>
@@ -362,6 +325,15 @@ export default function App() {
   );
 }
 
+function Flag({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span className={ok ? "diag-chip ok" : "diag-chip bad"}>
+      {ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+      {label}
+    </span>
+  );
+}
+
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="fact">
@@ -371,17 +343,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Choice({
-  active,
-  title,
-  sub,
-  onClick
-}: {
-  active: boolean;
-  title: string;
-  sub: string;
-  onClick: () => void;
-}) {
+function Choice({ active, title, sub, onClick }: { active: boolean; title: string; sub: string; onClick: () => void }) {
   return (
     <button className={active ? "choice active" : "choice"} onClick={onClick}>
       <b>{active ? "✓" : ""}</b>
