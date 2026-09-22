@@ -133,7 +133,8 @@ fn connected_device(app: &AppHandle) -> Result<android::AndroidDevice, WhatsAppE
 }
 
 fn quote_shell(value: &str) -> String {
-  format!("'{}'", value.replace(''', "'\\''"))
+  // H TRANS only quotes fixed WhatsApp paths and WhatsApp-generated msgstore filenames.
+  format!("'{}'", value)
 }
 
 fn shell_text(app: &AppHandle, serial: &str, command: &str) -> Result<String, WhatsAppError> {
