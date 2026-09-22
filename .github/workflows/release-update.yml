@@ -49,14 +49,8 @@ jobs:
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         run: |
-          $zip = "$env:RUNNER_TEMP\platform-tools.zip"
-          $extract = "$env:RUNNER_TEMP\platform-tools"
-          Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $extract -Force
-          New-Item -ItemType Directory -Force "src-tauri\resources\platform-tools" | Out-Null
-          Copy-Item "$extract\platform-tools\adb.exe" "src-tauri\resources\platform-tools\adb.exe" -Force
-          Copy-Item "$extract\platform-tools\AdbWinApi.dll" "src-tauri\resources\platform-tools\AdbWinApi.dll" -Force
-          Copy-Item "$extract\platform-tools\AdbWinUsbApi.dll" "src-tauri\resources\platform-tools\AdbWinUsbApi.dll" -Force
+          New-Item -ItemType Directory -Force "src-tauri\resources" | Out-Null
+          Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile "src-tauri\resources\android-platform-tools.zip"
 
       - name: Install dependencies
         if: steps.existing.outputs.exists != 'true'
