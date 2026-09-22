@@ -61,13 +61,6 @@ fn restore_whatsapp(app: AppHandle, backup_file: String, variant: String) -> Res
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
-    .setup(|app| {
-      let handle = app.handle().clone();
-      std::thread::spawn(move || {
-        let _ = android::start_adb_server(&handle);
-      });
-      Ok(())
-    })
     .invoke_handler(tauri::generate_handler![
       detect_android_device,
       diagnose_android_connection,

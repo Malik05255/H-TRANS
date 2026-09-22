@@ -95,6 +95,7 @@ export default function App() {
   );
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const refreshBusy = useRef(false);
 
   const refresh = async () => {
@@ -142,15 +143,11 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = "ar";
     document.documentElement.dir = "rtl";
-    refresh();
 
-    if (!preview) {
-      window.setTimeout(() => {
-        backend.checkForUpdate().then(setUpdateInfo).catch(() => undefined);
-      }, 1500);
+    if (preview) {
+      refresh();
     }
 
-    const timer = preview ? undefined : window.setInterval(refresh, 6000);
     let unlistenTransfer: (() => void) | undefined;
     let unlistenUpdate: (() => void) | undefined;
 
@@ -158,7 +155,6 @@ export default function App() {
     backend.onUpdateProgress(setUpdateProgress).then((fn) => (unlistenUpdate = fn)).catch(() => undefined);
 
     return () => {
-      if (timer) window.clearInterval(timer);
       unlistenTransfer?.();
       unlistenUpdate?.();
     };
@@ -205,6 +201,22 @@ export default function App() {
       await refresh();
     } catch (error) {
       setWirelessMessage(translateBackendError(error));
+    }
+  }
+
+  async function checkUpdate() {
+    if (preview || checkingUpdate) return;
+    setCheckingUpdate(true);
+    setResult("");
+
+    try {
+      const info = await backend.checkForUpdate();
+      setUpdateInfo(info);
+      if (!info) setResult(ar.noUpdate);
+    } catch (error) {
+      setResult(ar.updateCheckFailed + ": " + translateBackendError(error));
+    } finally {
+      setCheckingUpdate(false);
     }
   }
 
@@ -300,7 +312,7 @@ export default function App() {
         </div>
 
         <div className="header-actions">
-          {updateInfo && (
+          {updateInfo ? (
             <button className="update-button" onClick={installUpdate} disabled={updating}>
               <Download size={18} />
               <span>
@@ -308,8 +320,16 @@ export default function App() {
                 <small>{updating && updateProgress ? updateProgress.percent + "٪" : "v" + updateInfo.version}</small>
               </span>
             </button>
+          ) : (
+            <button className="update-button" onClick={checkUpdate} disabled={checkingUpdate}>
+              <RefreshCw size={18} />
+              <span>
+                <b>{checkingUpdate ? ar.updateChecking : ar.checkUpdate}</b>
+                <small>{ar.manualOnly}</small>
+              </span>
+            </button>
           )}
-          <span className="version-chip">{ar.version} 0.4.3</span>
+          <span className="version-chip">{ar.version} 0.4.4</span>
         </div>
       </header>
 

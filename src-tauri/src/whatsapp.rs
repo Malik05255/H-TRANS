@@ -5,7 +5,7 @@ use std::{
   fs::{self, File},
   io::{Read, Write},
   path::{Path, PathBuf},
-  process::{Command, Stdio},
+  process::Stdio,
   time::{SystemTime, UNIX_EPOCH}
 };
 use tauri::{AppHandle, Emitter, Manager};
@@ -208,7 +208,7 @@ fn pull_remote_file(
   stage: &str
 ) -> Result<(), WhatsAppError> {
   let command = format!("cat {}", quote_shell(&remote.path));
-  let mut child = Command::new(android::adb_path(app))
+  let mut child = android::hidden_command(android::adb_path(app))
     .args(["-s", serial, "exec-out", &command])
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -279,7 +279,7 @@ fn push_local_file(
   end_percent: u8
 ) -> Result<(), WhatsAppError> {
   let command = format!("cat > {}", quote_shell(remote_path));
-  let mut child = Command::new(android::adb_path(app))
+  let mut child = android::hidden_command(android::adb_path(app))
     .args(["-s", serial, "exec-in", &command])
     .stdin(Stdio::piped())
     .stdout(Stdio::null())

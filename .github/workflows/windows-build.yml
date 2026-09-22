@@ -24,6 +24,10 @@ jobs:
           New-Item -ItemType Directory -Force "src-tauri\resources" | Out-Null
           Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile "src-tauri\resources\android-platform-tools.zip"
 
+      - name: Generate H TRANS installer branding
+        shell: pwsh
+        run: .\\src-tauri\\windows\\generate-installer-assets.ps1
+
       - name: Install frontend dependencies
         run: npm install
 
