@@ -1,15 +1,31 @@
 use serde::Serialize;
 use std::{
+  ffi::OsStr,
   fs::{self, File},
   io::copy,
   path::PathBuf,
   process::{Command, Output},
+  sync::{Mutex, OnceLock},
   thread,
-  time::Duration
+  time::{Duration, Instant}
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use zip::ZipArchive;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn hidden_command<S: AsRef<OsStr>>(program: S) -> Command {
+  let mut command = Command::new(program);
+  #[cfg(target_os = "windows")]
+  {
+    command.creation_flags(CREATE_NO_WINDOW);
+  }
+  command
+}
 
 #[derive(Debug, Error)]
 pub enum AndroidError {
@@ -126,7 +142,7 @@ pub fn adb_path(app: &AppHandle) -> PathBuf {
 }
 
 fn raw_adb(app: &AppHandle, args: &[&str]) -> Result<Output, AndroidError> {
-  Command::new(adb_path(app))
+  hidden_command(adb_path(app))
     .args(args)
     .output()
     .map_err(|_| AndroidError::AdbUnavailable)
@@ -223,7 +239,10 @@ fn parse_devices(stdout: &str) -> Vec<(String, String)> {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_phone_probe() -> WindowsPhoneProbe {
+static WINDOWS_PROBE_CACHE: OnceLock<Mutex<Option<(Instant, WindowsPhoneProbe)>>> = OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn windows_phone_probe_uncached() -> WindowsPhoneProbe {
   let script = r#"
 $patterns = 'Android|ADB|MTP|Samsung|Galaxy|Pixel|Xiaomi|Redmi|POCO|OnePlus|OPPO|vivo|HONOR|HUAWEI|Motorola|realme|Nothing'
 $items = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
@@ -240,7 +259,7 @@ foreach ($item in $items) {
 }
 "#;
 
-  let output = Command::new("powershell")
+  let output = hidden_command("powershell")
     .args(["-NoProfile", "-NonInteractive", "-Command", script])
     .output();
 
@@ -300,6 +319,36 @@ foreach ($item in $items) {
   }
 }
 
+#[cfg(target_os = "windows")]
+fn windows_phone_probe() -> WindowsPhoneProbe {
+  let cache = WINDOWS_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+
+  if let Ok(guard) = cache.lock() {
+    if let Some((captured, probe)) = guard.as_ref() {
+      if captured.elapsed() < Duration::from_secs(10) {
+        return probe.clone();
+      }
+    }
+  }
+
+  let probe = windows_phone_probe_uncached();
+
+  if let Ok(mut guard) = cache.lock() {
+    *guard = Some((Instant::now(), probe.clone()));
+  }
+
+  probe
+}
+
+#[cfg(target_os = "windows")]
+fn clear_windows_probe_cache() {
+  if let Some(cache) = WINDOWS_PROBE_CACHE.get() {
+    if let Ok(mut guard) = cache.lock() {
+      *guard = None;
+    }
+  }
+}
+
 #[cfg(not(target_os = "windows"))]
 fn windows_phone_probe() -> WindowsPhoneProbe {
   WindowsPhoneProbe {
@@ -309,6 +358,9 @@ fn windows_phone_probe() -> WindowsPhoneProbe {
     adb_interface_seen: false
   }
 }
+
+#[cfg(not(target_os = "windows"))]
+fn clear_windows_probe_cache() {}
 
 fn diagnostic(
   code: &str,
@@ -336,9 +388,8 @@ fn diagnostic(
 pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
   let path = adb_path(app);
   let adb_path_text = path.display().to_string();
-  let probe = windows_phone_probe();
 
-  let version = Command::new(&path).arg("version").output();
+  let version = hidden_command(&path).arg("version").output();
   let Ok(version) = version else {
     return diagnostic(
       "adb_unavailable",
@@ -346,7 +397,7 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       false,
       false,
       adb_path_text,
-      probe,
+      windows_phone_probe(),
       None
     );
   };
@@ -358,12 +409,12 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       false,
       false,
       adb_path_text,
-      probe,
+      windows_phone_probe(),
       Some(String::from_utf8_lossy(&version.stderr).trim().to_string())
     );
   }
 
-  let server = Command::new(&path).arg("start-server").output();
+  let server = hidden_command(&path).arg("start-server").output();
   let server_running = server.as_ref().map(|out| out.status.success()).unwrap_or(false);
 
   if !server_running {
@@ -377,12 +428,12 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       false,
       false,
       adb_path_text,
-      probe,
+      windows_phone_probe(),
       raw
     );
   }
 
-  let devices = Command::new(&path).args(["devices", "-l"]).output();
+  let devices = hidden_command(&path).args(["devices", "-l"]).output();
   let Ok(devices) = devices else {
     return diagnostic(
       "adb_error",
@@ -390,13 +441,21 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       true,
       false,
       adb_path_text,
-      probe,
+      windows_phone_probe(),
       None
     );
   };
 
   let stdout = String::from_utf8_lossy(&devices.stdout).to_string();
   let parsed = parse_devices(&stdout);
+
+  // If ADB already sees the phone, do not run the expensive PowerShell PnP scan.
+  let adb_probe = WindowsPhoneProbe {
+    usb_seen: true,
+    device_name: None,
+    device_status: None,
+    adb_interface_seen: true
+  };
 
   if parsed.iter().any(|(_, state)| state == "device") {
     return diagnostic(
@@ -405,7 +464,7 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       true,
       true,
       adb_path_text,
-      probe,
+      adb_probe,
       Some(stdout)
     );
   }
@@ -417,7 +476,7 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       true,
       true,
       adb_path_text,
-      probe,
+      adb_probe,
       Some(stdout)
     );
   }
@@ -429,11 +488,12 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
       true,
       true,
       adb_path_text,
-      probe,
+      adb_probe,
       Some(stdout)
     );
   }
 
+  let probe = windows_phone_probe();
   diagnostic(
     if probe.usb_seen { "usb_seen_no_adb" } else { "no_usb_device" },
     true,
@@ -447,18 +507,16 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
 
 pub fn repair_connection(app: &AppHandle) -> AndroidDiagnostic {
   let path = adb_path(app);
+  clear_windows_probe_cache();
 
-  let _ = Command::new(&path).arg("kill-server").output();
+  let _ = hidden_command(&path).arg("kill-server").output();
+  thread::sleep(Duration::from_millis(300));
+
+  let _ = hidden_command(&path).arg("start-server").output();
   thread::sleep(Duration::from_millis(450));
 
-  let _ = Command::new(&path).arg("start-server").output();
-  thread::sleep(Duration::from_millis(600));
-
-  let _ = Command::new(&path).arg("reconnect").output();
-  thread::sleep(Duration::from_millis(350));
-
-  let _ = Command::new(&path).args(["reconnect", "offline"]).output();
-  thread::sleep(Duration::from_millis(350));
+  let _ = hidden_command(&path).arg("reconnect").output();
+  thread::sleep(Duration::from_millis(250));
 
   diagnose_connection(app)
 }
