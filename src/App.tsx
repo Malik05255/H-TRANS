@@ -436,7 +436,7 @@ export default function App() {
                 ? "جارٍ الفحص..."
                 : "فحص التحديث"}
           </button>
-          <small>الإصدار 0.6.3</small>
+          <small>الإصدار 0.6.4</small>
         </div>
       </aside>
 
