@@ -6,7 +6,7 @@ mod whatsapp;
 use android::{AdbPeer, AndroidDevice, AndroidDiagnostic};
 use tauri::AppHandle;
 use update::UpdateInfo;
-use whatsapp::{BackupSummary, RestoreOutcome};
+use whatsapp::{BackupSummary, RestoreOutcome, WhatsAppReadProbe};
 
 #[tauri::command]
 fn detect_android_device(app: AppHandle) -> Result<Option<AndroidDevice>, String> {
@@ -77,6 +77,14 @@ fn download_and_install_update(app: AppHandle, info: UpdateInfo) -> Result<(), S
 }
 
 #[tauri::command]
+fn probe_whatsapp_read_state(
+  app: AppHandle,
+  variant: String
+) -> Result<WhatsAppReadProbe, String> {
+  whatsapp::probe_read_state(&app, &variant).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn inspect_htrans_backup(backup_file: String) -> Result<BackupSummary, String> {
   whatsapp::inspect_backup(&backup_file).map_err(|e| e.to_string())
 }
@@ -116,6 +124,7 @@ pub fn run() {
       connect_wireless_android,
       check_for_update,
       download_and_install_update,
+      probe_whatsapp_read_state,
       inspect_htrans_backup,
       backup_whatsapp,
       restore_whatsapp

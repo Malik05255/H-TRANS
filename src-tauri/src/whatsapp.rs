@@ -61,6 +61,17 @@ pub struct RestoreOutcome {
   pub restored_files: usize
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhatsAppReadProbe {
+  pub variant: String,
+  pub installed: bool,
+  pub readable: bool,
+  pub database_files: usize,
+  pub current_bytes: u64,
+  pub chat_count: Option<u64>
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
   format: String,
@@ -644,6 +655,29 @@ fn verify_archive(path: &Path) -> Result<Manifest, WhatsAppError> {
   }
 
   Ok(manifest)
+}
+
+pub fn probe_read_state(
+  app: &AppHandle,
+  variant: &str
+) -> Result<WhatsAppReadProbe, WhatsAppError> {
+  let info = variant_info(variant)?;
+  let device = connected_device(app)?;
+  let installed = package_is_installed(&device, variant);
+  let all_files = remote_database_files(app, &device.serial, info.database_dir)?;
+  let current = current_remote_database_files(app, &device.serial, info.database_dir)?;
+  let current_bytes = current.iter().map(|file| file.bytes).sum();
+
+  Ok(WhatsAppReadProbe {
+    variant: variant.to_string(),
+    installed,
+    readable: !current.is_empty() && current_bytes > 0,
+    database_files: all_files.len(),
+    current_bytes,
+    // The local backup is encrypted (crypt14/crypt15). A real chat count is
+    // only populated once H TRANS has access to a decrypted msgstore database.
+    chat_count: None
+  })
 }
 
 pub fn inspect_backup(backup_file: &str) -> Result<BackupSummary, WhatsAppError> {

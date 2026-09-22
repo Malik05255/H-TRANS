@@ -6,6 +6,7 @@ import type {
   AndroidDiagnostic,
   BackupSummary,
   RestoreOutcome,
+  WhatsAppReadProbe,
   TransferProgress,
   UpdateInfo,
   UpdateProgress,
@@ -47,6 +48,9 @@ export const backend = {
 
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
   installUpdate: (info: UpdateInfo) => invoke<void>("download_and_install_update", { info }),
+
+  probeWhatsappReadState: (variant: WhatsAppVariant) =>
+    invoke<WhatsAppReadProbe>("probe_whatsapp_read_state", { variant }),
 
   inspectBackup: (backupFile: string) =>
     invoke<BackupSummary>("inspect_htrans_backup", { backupFile }),

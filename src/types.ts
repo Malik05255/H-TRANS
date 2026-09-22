@@ -61,6 +61,15 @@ export interface UpdateProgress {
   detail?: string;
 }
 
+export interface WhatsAppReadProbe {
+  variant: "personal" | "business";
+  installed: boolean;
+  readable: boolean;
+  databaseFiles: number;
+  currentBytes: number;
+  chatCount?: number | null;
+}
+
 export interface BackupSummary {
   variant: "personal" | "business";
   sourceSerial: string;

@@ -17,6 +17,7 @@ import type {
   AndroidDevice,
   AndroidDiagnostic,
   TransferProgress,
+  WhatsAppReadProbe,
   UpdateInfo,
   UpdateProgress,
   WhatsAppVariant
@@ -25,6 +26,13 @@ import type {
 type Page = "backup" | "restore";
 const idle: TransferProgress = { operation: "backup", percent: 0, stage: "Ready" };
 const preview = new URLSearchParams(window.location.search).get("preview");
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1024) return mb.toFixed(mb >= 100 ? 0 : 1) + " MB";
+  return (mb / 1024).toFixed(2) + " GB";
+}
 
 function demoDevice(): AndroidDevice {
   return {
@@ -57,6 +65,9 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [personalRead, setPersonalRead] = useState<WhatsAppReadProbe | null>(null);
+  const [businessRead, setBusinessRead] = useState<WhatsAppReadProbe | null>(null);
+  const [readingWhatsApp, setReadingWhatsApp] = useState(false);
 
   const mirrorRef = useRef<HTMLDivElement>(null);
   const syncBusy = useRef(false);
@@ -106,6 +117,21 @@ export default function App() {
     }
   }
 
+  async function loadWhatsAppReadState() {
+    if (preview || !authorized) return;
+    setReadingWhatsApp(true);
+    try {
+      const [personal, business] = await Promise.all([
+        backend.probeWhatsappReadState("personal").catch(() => null),
+        backend.probeWhatsappReadState("business").catch(() => null)
+      ]);
+      setPersonalRead(personal);
+      setBusinessRead(business);
+    } finally {
+      setReadingWhatsApp(false);
+    }
+  }
+
   async function loadAuthorizedPhone() {
     if (syncBusy.current) return;
     syncBusy.current = true;
@@ -115,6 +141,7 @@ export default function App() {
       if (nextDevice?.state === "connected" && nextDevice.serial) {
         const changed = device?.serial !== nextDevice.serial;
         setDevice(nextDevice);
+        window.setTimeout(() => loadWhatsAppReadState(), 120);
         if (changed || !mirrorReady) {
           window.setTimeout(() => startMirror(nextDevice.serial), 80);
         }
@@ -146,7 +173,10 @@ export default function App() {
         setDevice(nextDevice);
 
         if (nextDevice?.state === "connected" && nextDevice.serial) {
-          window.setTimeout(() => startMirror(nextDevice.serial), 80);
+          window.setTimeout(() => {
+            startMirror(nextDevice.serial);
+            loadWhatsAppReadState();
+          }, 100);
         }
       } else if (nextDiagnostic.windowsUsbSeen) {
         setDevice({
@@ -200,6 +230,8 @@ export default function App() {
           await backend.stopLiveMirror().catch(() => undefined);
           setMirrorReady(false);
           setDevice(null);
+          setPersonalRead(null);
+          setBusinessRead(null);
         }
       } catch {
         // Lightweight watcher is intentionally silent.
@@ -349,6 +381,26 @@ export default function App() {
         ? "USB جاهز"
         : "غير متصل";
 
+  const personalReadLabel = personalRead?.chatCount != null
+    ? personalRead.chatCount + " محادثة"
+    : personalRead?.readable
+      ? "تمت القراءة • " + formatBytes(personalRead.currentBytes)
+      : readingWhatsApp
+        ? "جارٍ قراءة البيانات..."
+        : authorized
+          ? "لا توجد نسخة محلية"
+          : "بانتظار ADB";
+
+  const businessReadLabel = businessRead?.chatCount != null
+    ? businessRead.chatCount + " محادثة"
+    : businessRead?.readable
+      ? "تمت القراءة • " + formatBytes(businessRead.currentBytes)
+      : readingWhatsApp
+        ? "جارٍ قراءة البيانات..."
+        : authorized
+          ? "لا توجد نسخة محلية"
+          : "بانتظار ADB";
+
   const actionDisabled = running || (page === "backup" ? !backupSupported : !authorized);
 
   return (
@@ -384,7 +436,7 @@ export default function App() {
                 ? "جارٍ الفحص..."
                 : "فحص التحديث"}
           </button>
-          <small>الإصدار 0.6.2</small>
+          <small>الإصدار 0.6.3</small>
         </div>
       </aside>
 
@@ -456,16 +508,22 @@ export default function App() {
             <button className={variant === "personal" ? "variant active" : "variant"} onClick={() => setVariant("personal")}>
               <span className="variant-check">{variant === "personal" ? <Check size={16} /> : null}</span>
               <div>
-                <strong>واتساب</strong>
-                <small>{authorized ? (device?.whatsappInstalled ? "جاهز" : "غير مثبت") : "بانتظار ADB"}</small>
+                <div className="variant-title-line">
+                  <strong>واتساب</strong>
+                  {personalRead?.readable && <em>مقروء</em>}
+                </div>
+                <small>{device?.whatsappInstalled === false && authorized ? "غير مثبت" : personalReadLabel}</small>
               </div>
             </button>
 
             <button className={variant === "business" ? "variant active" : "variant"} onClick={() => setVariant("business")}>
               <span className="variant-check">{variant === "business" ? <Check size={16} /> : null}</span>
               <div>
-                <strong>واتساب للأعمال</strong>
-                <small>{authorized ? (device?.whatsappBusinessInstalled ? "جاهز" : "غير مثبت") : "بانتظار ADB"}</small>
+                <div className="variant-title-line">
+                  <strong>واتساب للأعمال</strong>
+                  {businessRead?.readable && <em>مقروء</em>}
+                </div>
+                <small>{device?.whatsappBusinessInstalled === false && authorized ? "غير مثبت" : businessReadLabel}</small>
               </div>
             </button>
 

@@ -19,9 +19,7 @@ use std::os::windows::process::CommandExt;
 use windows_sys::Win32::{
   Foundation::HWND,
   UI::WindowsAndMessaging::{
-    FindWindowW, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWL_STYLE, GWLP_HWNDPARENT, HWND_TOP, SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_SHOW,
-    WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE
+    FindWindowW, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_SHOWWINDOW, SW_SHOW
   }
 };
 
@@ -134,16 +132,13 @@ fn wide(value: &str) -> Vec<u16> {
 }
 
 #[cfg(target_os = "windows")]
-fn screen_rect(app: &AppHandle, rect: MirrorRect) -> Result<(HWND, i32, i32, i32, i32), String> {
+fn screen_rect(app: &AppHandle, rect: MirrorRect) -> Result<(i32, i32, i32, i32), String> {
   let window = app
     .get_webview_window("main")
     .ok_or_else(|| "تعذر العثور على نافذة H TRANS.".to_string())?;
-  let raw = window.hwnd().map_err(|e| e.to_string())?;
-  let parent = raw.0 as HWND;
   let inner = window.inner_position().map_err(|e| e.to_string())?;
 
   Ok((
-    parent,
     inner.x.saturating_add(rect.x),
     inner.y.saturating_add(rect.y),
     rect.width.max(1),
@@ -153,31 +148,18 @@ fn screen_rect(app: &AppHandle, rect: MirrorRect) -> Result<(HWND, i32, i32, i32
 
 #[cfg(target_os = "windows")]
 fn place_overlay(app: &AppHandle, child_hwnd: isize, rect: MirrorRect) -> Result<(), String> {
-  let (parent, x, y, width, height) = screen_rect(app, rect)?;
+  let (x, y, width, height) = screen_rect(app, rect)?;
   let child = child_hwnd as HWND;
 
   unsafe {
-    // Keep scrcpy as a real top-level SDL window. Re-parenting SDL into WebView2
-    // can render a permanently black surface on Windows.
-    let style = GetWindowLongPtrW(child, GWL_STYLE);
-    let remove = (WS_CAPTION
-      | WS_THICKFRAME
-      | WS_SYSMENU
-      | WS_MINIMIZEBOX
-      | WS_MAXIMIZEBOX) as isize;
-    let add = (WS_POPUP | WS_VISIBLE) as isize;
-
-    SetWindowLongPtrW(child, GWL_STYLE, (style & !remove) | add);
-    SetWindowLongPtrW(child, GWLP_HWNDPARENT, parent as isize);
-
     SetWindowPos(
       child,
-      HWND_TOP,
+      HWND_TOPMOST,
       x,
       y,
       width,
       height,
-      SWP_SHOWWINDOW | SWP_FRAMECHANGED
+      SWP_SHOWWINDOW
     );
     ShowWindow(child, SW_SHOW);
   }
@@ -215,6 +197,12 @@ pub fn start(
     .ok_or_else(|| "مسار scrcpy غير صالح.".to_string())?;
   let title = format!("HTRANS_MIRROR_{}", serial.replace(':', "_"));
 
+  let (screen_x, screen_y, screen_width, screen_height) = screen_rect(app, rect)?;
+  let window_x = screen_x.to_string();
+  let window_y = screen_y.to_string();
+  let window_width = screen_width.to_string();
+  let window_height = screen_height.to_string();
+
   let mut command = Command::new(&exe);
   command
     .current_dir(dir)
@@ -224,6 +212,15 @@ pub fn start(
       "--no-audio",
       "--no-control",
       "--window-borderless",
+      "--always-on-top",
+      "--window-x",
+      &window_x,
+      "--window-y",
+      &window_y,
+      "--window-width",
+      &window_width,
+      "--window-height",
+      &window_height,
       "--no-terminal-title",
       "--video-codec=h264",
       "--max-size=1080",
