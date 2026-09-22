@@ -1,5 +1,7 @@
 use serde::Serialize;
 use std::{
+  fs::{self, File},
+  io::copy,
   path::PathBuf,
   process::{Command, Output},
   thread,
@@ -7,6 +9,7 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
+use zip::ZipArchive;
 
 #[derive(Debug, Error)]
 pub enum AndroidError {
@@ -53,18 +56,66 @@ struct WindowsPhoneProbe {
   adb_interface_seen: bool
 }
 
+fn prepare_bundled_adb(app: &AppHandle) -> Option<PathBuf> {
+  let base = app
+    .path()
+    .app_local_data_dir()
+    .ok()?
+    .join("adb-runtime")
+    .join(env!("CARGO_PKG_VERSION"))
+    .join("platform-tools");
+
+  let adb_exe = base.join("adb.exe");
+  let api_dll = base.join("AdbWinApi.dll");
+  let usb_dll = base.join("AdbWinUsbApi.dll");
+
+  if adb_exe.exists() && api_dll.exists() && usb_dll.exists() {
+    return Some(adb_exe);
+  }
+
+  let resource_dir = app.path().resource_dir().ok()?;
+  let archive_path = [
+    resource_dir.join("android-platform-tools.zip"),
+    resource_dir.join("resources").join("android-platform-tools.zip")
+  ]
+  .into_iter()
+  .find(|path| path.exists())?;
+
+  fs::create_dir_all(&base).ok()?;
+
+  let file = File::open(archive_path).ok()?;
+  let mut archive = ZipArchive::new(file).ok()?;
+
+  for name in ["adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll"] {
+    let entry_name = format!("platform-tools/{name}");
+    let mut entry = archive.by_name(&entry_name).ok()?;
+    let target = base.join(name);
+    let mut output = File::create(target).ok()?;
+    copy(&mut entry, &mut output).ok()?;
+  }
+
+  if adb_exe.exists() && api_dll.exists() && usb_dll.exists() {
+    Some(adb_exe)
+  } else {
+    None
+  }
+}
+
 pub fn adb_path(app: &AppHandle) -> PathBuf {
   if let Ok(custom) = std::env::var("HTRANS_ADB") {
     return PathBuf::from(custom);
   }
 
+  if let Some(bundled) = prepare_bundled_adb(app) {
+    return bundled;
+  }
+
+  // Compatibility fallback for H TRANS 0.4.0 and older installs.
   if let Ok(resource_dir) = app.path().resource_dir() {
-    let candidates = [
+    for candidate in [
       resource_dir.join("platform-tools").join("adb.exe"),
       resource_dir.join("resources").join("platform-tools").join("adb.exe")
-    ];
-
-    for candidate in candidates {
+    ] {
       if candidate.exists() {
         return candidate;
       }
@@ -109,6 +160,10 @@ pub fn start_adb_server(app: &AppHandle) -> Result<(), AndroidError> {
       String::from_utf8_lossy(&started.stderr).trim().to_string()
     ))
   }
+}
+
+pub fn stop_adb_server(app: &AppHandle) {
+  let _ = raw_adb(app, &["kill-server"]);
 }
 
 pub fn pair_wireless(app: &AppHandle, endpoint: &str, code: &str) -> Result<String, AndroidError> {
