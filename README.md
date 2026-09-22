@@ -1,25 +1,19 @@
 # H TRANS
 
-H TRANS is a Windows-first Android backup and restore application.
+Windows-first Android WhatsApp chat backup and restore application.
 
-## Initial scope
-
+## MVP
 - Windows 10/11
 - Android over USB
-- Automatic ADB device detection
-- WhatsApp and WhatsApp Business chat backup
-- Chats-only backups (media excluded)
-- Local backup files
-- Backup integrity verification
-- Restore workflow with safety backup
-- Real operation progress
+- Automatic ADB detection
+- WhatsApp / WhatsApp Business
+- Chats-only backup (media excluded)
+- Local .htrans backup files
+- SHA-256 verification
+- Restore workflow with safety-first handling
 
-## Planned stack
-
+## Stack
 - Tauri 2
-- React
-- TypeScript
+- React + TypeScript
 - Rust
 - Android Platform Tools (ADB)
-
-> Early development scaffold.
