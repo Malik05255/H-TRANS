@@ -259,27 +259,27 @@ fn run_session(
       let mut payload = vec![0u8; size];
       read_exact_cancelable(&mut stream, &mut payload, &cancel)?;
 
-      let mut latest_frame = None;
+      let mut latest_frame: Option<(usize, usize, Vec<u8>)> = None;
       for unit in nal_units(&payload) {
         let decoded = decoder
           .decode(unit)
           .map_err(|e| format!("فشل فك H.264: {e}"))?;
+
         if let Some(yuv) = decoded {
-          latest_frame = Some(yuv);
+          let (width, height) = yuv.dimensions();
+          if width == 0 || height == 0 || width > u16::MAX as usize || height > u16::MAX as usize {
+            continue;
+          }
+
+          let mut rgba = vec![0u8; yuv.rgba8_len()];
+          yuv.write_rgba8(&mut rgba);
+          latest_frame = Some((width, height, rgba));
         }
       }
 
-      let Some(yuv) = latest_frame else {
+      let Some((width, height, rgba)) = latest_frame else {
         continue;
       };
-
-      let (width, height) = yuv.dimensions();
-      if width == 0 || height == 0 || width > u16::MAX as usize || height > u16::MAX as usize {
-        continue;
-      }
-
-      let mut rgba = vec![0u8; yuv.rgba8_len()];
-      yuv.write_rgba8(&mut rgba);
 
       let mut jpeg = Vec::with_capacity(rgba.len() / 5);
       JpegEncoder::new(&mut jpeg, 72)
