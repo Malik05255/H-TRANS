@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   ArchiveRestore,
@@ -95,6 +95,7 @@ export default function App() {
   );
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [updating, setUpdating] = useState(false);
+  const refreshBusy = useRef(false);
 
   const refresh = async () => {
     if (preview) {
@@ -104,13 +105,37 @@ export default function App() {
       return;
     }
 
+    if (refreshBusy.current) return;
+    refreshBusy.current = true;
+
     try {
-      const values = await Promise.all([backend.detectDevice(), backend.diagnoseConnection()]);
-      setDevice(values[0]);
-      setDiagnostic(values[1]);
+      const nextDiagnostic = await backend.diagnoseConnection();
+      setDiagnostic(nextDiagnostic);
+
+      if (
+        nextDiagnostic.code === "connected" ||
+        nextDiagnostic.code === "unauthorized" ||
+        nextDiagnostic.code === "offline"
+      ) {
+        setDevice(await backend.detectDevice());
+      } else if (nextDiagnostic.windowsUsbSeen) {
+        setDevice({
+          serial: "",
+          state: "usb_only",
+          manufacturer: "",
+          model: nextDiagnostic.windowsDeviceName || "Android",
+          androidVersion: "",
+          whatsappInstalled: false,
+          whatsappBusinessInstalled: false
+        });
+      } else {
+        setDevice(null);
+      }
     } catch {
       setDevice(null);
       setDiagnostic(null);
+    } finally {
+      refreshBusy.current = false;
     }
   };
 
@@ -120,10 +145,12 @@ export default function App() {
     refresh();
 
     if (!preview) {
-      backend.checkForUpdate().then(setUpdateInfo).catch(() => undefined);
+      window.setTimeout(() => {
+        backend.checkForUpdate().then(setUpdateInfo).catch(() => undefined);
+      }, 1500);
     }
 
-    const timer = preview ? undefined : window.setInterval(refresh, 3000);
+    const timer = preview ? undefined : window.setInterval(refresh, 6000);
     let unlistenTransfer: (() => void) | undefined;
     let unlistenUpdate: (() => void) | undefined;
 
