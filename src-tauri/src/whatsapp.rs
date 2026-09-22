@@ -9,7 +9,6 @@ use std::{
   time::{SystemTime, UNIX_EPOCH}
 };
 use tauri::{AppHandle, Emitter, Manager};
-use tempfile::tempdir;
 use thiserror::Error;
 use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
@@ -195,6 +194,34 @@ fn remote_database_files(
   Ok(files)
 }
 
+fn current_remote_database_files(
+  app: &AppHandle,
+  serial: &str,
+  database_dir: &str
+) -> Result<Vec<RemoteFile>, WhatsAppError> {
+  let all = remote_database_files(app, serial, database_dir)?;
+  if all.is_empty() {
+    return Ok(all);
+  }
+
+  let mut current: Vec<RemoteFile> = all
+    .iter()
+    .filter(|file| file.name.starts_with("msgstore.db.crypt"))
+    .cloned()
+    .collect();
+
+  if !current.is_empty() {
+    current.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    current.truncate(1);
+    return Ok(current);
+  }
+
+  let mut fallback = all;
+  fallback.sort_by(|a, b| b.name.cmp(&a.name));
+  fallback.truncate(1);
+  Ok(fallback)
+}
+
 fn pull_remote_file(
   app: &AppHandle,
   serial: &str,
@@ -329,6 +356,136 @@ fn push_local_file(
     return Err(WhatsAppError::Adb(stderr_text));
   }
 
+  Ok(())
+}
+
+fn package_remote_files(
+  app: &AppHandle,
+  operation: &'static str,
+  variant: &str,
+  package: &str,
+  serial: &str,
+  remote_files: &[RemoteFile],
+  destination: &Path,
+  start_percent: u8,
+  end_percent: u8,
+  stage: &str
+) -> Result<(), WhatsAppError> {
+  if let Some(parent) = destination.parent() {
+    fs::create_dir_all(parent)?;
+  }
+
+  let total_bytes: u64 = remote_files.iter().map(|file| file.bytes).sum();
+  if let Some(parent) = destination.parent() {
+    let available = fs2::available_space(parent).unwrap_or(u64::MAX);
+    let required = total_bytes.saturating_add(64 * 1024 * 1024);
+    if available < required {
+      return Err(WhatsAppError::Path(format!(
+        "المساحة الحرة غير كافية. المطلوب تقريبًا {:.1} جيجابايت والمتاح {:.1} جيجابايت.",
+        required as f64 / 1_073_741_824.0,
+        available as f64 / 1_073_741_824.0
+      )));
+    }
+  }
+
+  let file = File::create(destination)?;
+  let mut zip = ZipWriter::new(file);
+  let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+  let mut manifest_files = Vec::new();
+  let mut completed = 0u64;
+  let span = end_percent.saturating_sub(start_percent);
+
+  for remote in remote_files {
+    zip.start_file(format!("databases/{}", remote.name), options)?;
+
+    let command = format!("cat {}", quote_shell(&remote.path));
+    let mut child = android::hidden_command(android::adb_path(app))
+      .args(["-s", serial, "exec-out", &command])
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped())
+      .spawn()
+      .map_err(|e| WhatsAppError::Adb(e.to_string()))?;
+
+    let mut stdout = child
+      .stdout
+      .take()
+      .ok_or_else(|| WhatsAppError::Adb("ADB stdout unavailable".into()))?;
+    let mut hasher = Sha256::new();
+    let mut current = 0u64;
+    let mut buffer = [0u8; 128 * 1024];
+
+    loop {
+      let read = stdout.read(&mut buffer)?;
+      if read == 0 {
+        break;
+      }
+
+      zip.write_all(&buffer[..read])?;
+      hasher.update(&buffer[..read]);
+      current += read as u64;
+
+      let done = completed.saturating_add(current);
+      let ratio = if total_bytes == 0 {
+        1.0
+      } else {
+        (done as f64 / total_bytes as f64).clamp(0.0, 1.0)
+      };
+
+      emit(
+        app,
+        operation,
+        start_percent + (ratio * span as f64).round() as u8,
+        stage,
+        Some(format!("{} / {} bytes", done, total_bytes))
+      );
+    }
+
+    let status = child.wait()?;
+    if !status.success() {
+      let mut stderr_text = String::new();
+      if let Some(mut stderr) = child.stderr.take() {
+        let _ = stderr.read_to_string(&mut stderr_text);
+      }
+      return Err(WhatsAppError::Adb(stderr_text));
+    }
+
+    if current != remote.bytes {
+      return Err(WhatsAppError::InvalidBackup(format!(
+        "ADB read size mismatch for {} (expected {}, got {})",
+        remote.name, remote.bytes, current
+      )));
+    }
+
+    manifest_files.push(ManifestFile {
+      name: remote.name.clone(),
+      sha256: format!("{:x}", hasher.finalize()),
+      bytes: current
+    });
+    completed += current;
+  }
+
+  let manifest = Manifest {
+    format: "H-TRANS-WHATSAPP".to_string(),
+    version: 2,
+    created_unix: SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_secs(),
+    variant: variant.to_string(),
+    package: package.to_string(),
+    source_serial: serial.to_string(),
+    media_included: false,
+    database_files: manifest_files
+  };
+
+  zip.start_file("manifest.json", options)?;
+  zip.write_all(
+    &serde_json::to_vec_pretty(&manifest)
+      .map_err(|e| WhatsAppError::InvalidBackup(e.to_string()))?
+  )?;
+
+  zip.finish()?;
+  verify_archive(destination)?;
   Ok(())
 }
 
@@ -517,46 +674,23 @@ pub fn backup(
     Some(format!("{} {}", device.manufacturer, device.model))
   );
 
-  let remote_files = remote_database_files(app, &device.serial, info.database_dir)?;
+  let remote_files = current_remote_database_files(app, &device.serial, info.database_dir)?;
   if remote_files.is_empty() {
     return Err(WhatsAppError::DatabaseMissing);
   }
 
-  let temp = tempdir()?;
-  let total_bytes: u64 = remote_files.iter().map(|file| file.bytes).sum();
-  let mut completed = 0u64;
-  let mut local_files = Vec::new();
-
-  for remote in &remote_files {
-    let local = temp.path().join(&remote.name);
-    pull_remote_file(
-      app,
-      &device.serial,
-      remote,
-      &local,
-      completed,
-      total_bytes,
-      "backup",
-      8,
-      58,
-      "Copying encrypted chat data"
-    )?;
-    completed += remote.bytes;
-    local_files.push(local);
-  }
-
   let target = PathBuf::from(destination);
-  package_files(
+  package_remote_files(
     app,
     "backup",
     variant,
     info.package,
     &device.serial,
-    &local_files,
+    &remote_files,
     &target,
-    62,
+    8,
     94,
-    "Creating H TRANS backup"
+    "Copying encrypted chat data"
   )?;
 
   emit(
@@ -576,7 +710,7 @@ fn create_safety_backup(
   info: &VariantInfo,
   serial: &str
 ) -> Result<Option<PathBuf>, WhatsAppError> {
-  let remote_files = remote_database_files(app, serial, info.database_dir)?;
+  let remote_files = current_remote_database_files(app, serial, info.database_dir)?;
   if remote_files.is_empty() {
     return Ok(None);
   }
@@ -586,31 +720,8 @@ fn create_safety_backup(
     "restore",
     10,
     "Creating Safety Backup",
-    Some("Copying current local WhatsApp chat backups before any changes".into())
+    Some("Copying current local WhatsApp chat backup before any changes".into())
   );
-
-  let temp = tempdir()?;
-  let total_bytes: u64 = remote_files.iter().map(|file| file.bytes).sum();
-  let mut completed = 0u64;
-  let mut local_files = Vec::new();
-
-  for remote in &remote_files {
-    let local = temp.path().join(&remote.name);
-    pull_remote_file(
-      app,
-      serial,
-      remote,
-      &local,
-      completed,
-      total_bytes,
-      "restore",
-      11,
-      27,
-      "Creating Safety Backup"
-    )?;
-    completed += remote.bytes;
-    local_files.push(local);
-  }
 
   let documents = app
     .path()
@@ -626,17 +737,17 @@ fn create_safety_backup(
   let destination =
     safety_dir.join(format!("H-TRANS_SAFETY_{}_{}.htrans", variant, stamp));
 
-  package_files(
+  package_remote_files(
     app,
     "restore",
     variant,
     info.package,
     serial,
-    &local_files,
+    &remote_files,
     &destination,
-    28,
+    11,
     38,
-    "Verifying Safety Backup"
+    "Creating Safety Backup"
   )?;
 
   emit(
@@ -755,7 +866,8 @@ pub fn restore(
     );
   }
 
-  let temp = tempdir()?;
+  let restore_parent = source.parent().unwrap_or_else(|| Path::new("."));
+  let temp = tempfile::tempdir_in(restore_parent)?;
   emit(app, "restore", 42, "Extracting verified chat databases", None);
 
   {

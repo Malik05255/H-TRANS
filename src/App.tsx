@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArchiveRestore,
   Check,
@@ -224,12 +225,17 @@ export default function App() {
     const observer = new ResizeObserver(resize);
     if (mirrorRef.current) observer.observe(mirrorRef.current);
     window.addEventListener("resize", resize);
+
+    let unlistenMoved: (() => void) | undefined;
+    getCurrentWindow().onMoved(() => resize()).then((fn) => (unlistenMoved = fn)).catch(() => undefined);
+
     const timer = window.setTimeout(resize, 120);
 
     return () => {
       window.clearTimeout(timer);
       observer.disconnect();
       window.removeEventListener("resize", resize);
+      unlistenMoved?.();
     };
   }, [authorized, mirrorReady, page]);
 
@@ -378,7 +384,7 @@ export default function App() {
                 ? "جارٍ الفحص..."
                 : "فحص التحديث"}
           </button>
-          <small>الإصدار 0.6.1</small>
+          <small>الإصدار 0.6.2</small>
         </div>
       </aside>
 

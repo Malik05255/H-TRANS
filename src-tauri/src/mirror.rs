@@ -16,20 +16,32 @@ const SCRCPY_VERSION: &str = "4.1";
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-  FindWindowW, GetWindowLongPtrW, MoveWindow, SetParent, SetWindowLongPtrW, SetWindowPos,
-  ShowWindow, GWL_STYLE, HWND_TOP, SWP_SHOWWINDOW, SW_SHOW, WS_CAPTION, WS_CHILD,
-  WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE
+use windows_sys::Win32::{
+  Foundation::{HWND, POINT},
+  UI::WindowsAndMessaging::{
+    ClientToScreen, FindWindowW, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    GWL_STYLE, GWLP_HWNDPARENT, HWND_TOP, SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_SHOW,
+    WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE
+  }
 };
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+#[derive(Debug, Clone, Copy, Default)]
+struct MirrorRect {
+  x: i32,
+  y: i32,
+  width: i32,
+  height: i32
+}
+
 #[derive(Default)]
 struct MirrorState {
   child: Option<Child>,
   hwnd: isize,
-  serial: String
+  serial: String,
+  rect: Option<MirrorRect>
 }
 
 static MIRROR_STATE: OnceLock<Mutex<MirrorState>> = OnceLock::new();
@@ -122,44 +134,55 @@ fn wide(value: &str) -> Vec<u16> {
 }
 
 #[cfg(target_os = "windows")]
-fn embed_window(
-  app: &AppHandle,
-  child_hwnd: isize,
-  x: i32,
-  y: i32,
-  width: i32,
-  height: i32
-) -> Result<(), String> {
+fn screen_rect(app: &AppHandle, rect: MirrorRect) -> Result<(HWND, i32, i32, i32, i32), String> {
   let window = app
     .get_webview_window("main")
     .ok_or_else(|| "تعذر العثور على نافذة H TRANS.".to_string())?;
-  let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+  let raw = window.hwnd().map_err(|e| e.to_string())?;
+  let parent = raw.0 as HWND;
 
-  let parent = tauri_hwnd.0 as windows_sys::Win32::Foundation::HWND;
-  let child = child_hwnd as windows_sys::Win32::Foundation::HWND;
+  let mut point = POINT { x: rect.x, y: rect.y };
+  let ok = unsafe { ClientToScreen(parent, &mut point) };
+  if ok == 0 {
+    return Err("تعذر تحديد موضع شاشة الهاتف.".into());
+  }
+
+  Ok((
+    parent,
+    point.x,
+    point.y,
+    rect.width.max(1),
+    rect.height.max(1)
+  ))
+}
+
+#[cfg(target_os = "windows")]
+fn place_overlay(app: &AppHandle, child_hwnd: isize, rect: MirrorRect) -> Result<(), String> {
+  let (parent, x, y, width, height) = screen_rect(app, rect)?;
+  let child = child_hwnd as HWND;
 
   unsafe {
-    SetParent(child, parent);
-
+    // Keep scrcpy as a real top-level SDL window. Re-parenting SDL into WebView2
+    // can render a permanently black surface on Windows.
     let style = GetWindowLongPtrW(child, GWL_STYLE);
-    let remove = (WS_POPUP
-      | WS_CAPTION
+    let remove = (WS_CAPTION
       | WS_THICKFRAME
       | WS_SYSMENU
       | WS_MINIMIZEBOX
       | WS_MAXIMIZEBOX) as isize;
-    let add = (WS_CHILD | WS_VISIBLE) as isize;
-    SetWindowLongPtrW(child, GWL_STYLE, (style & !remove) | add);
+    let add = (WS_POPUP | WS_VISIBLE) as isize;
 
-    MoveWindow(child, x, y, width.max(1), height.max(1), 1);
+    SetWindowLongPtrW(child, GWL_STYLE, (style & !remove) | add);
+    SetWindowLongPtrW(child, GWLP_HWNDPARENT, parent as isize);
+
     SetWindowPos(
       child,
       HWND_TOP,
       x,
       y,
-      width.max(1),
-      height.max(1),
-      SWP_SHOWWINDOW
+      width,
+      height,
+      SWP_SHOWWINDOW | SWP_FRAMECHANGED
     );
     ShowWindow(child, SW_SHOW);
   }
@@ -175,6 +198,7 @@ pub fn stop() {
     }
     guard.hwnd = 0;
     guard.serial.clear();
+    guard.rect = None;
   }
 }
 
@@ -189,6 +213,7 @@ pub fn start(
 ) -> Result<(), String> {
   stop();
 
+  let rect = MirrorRect { x, y, width, height };
   let exe = scrcpy_exe(app)?;
   let dir = exe
     .parent()
@@ -225,7 +250,7 @@ pub fn start(
   let started = Instant::now();
   let mut found = 0isize;
 
-  while started.elapsed() < Duration::from_secs(8) {
+  while started.elapsed() < Duration::from_secs(10) {
     let hwnd = unsafe { FindWindowW(std::ptr::null(), title_wide.as_ptr()) };
     if !hwnd.is_null() {
       found = hwnd as isize;
@@ -241,12 +266,13 @@ pub fn start(
     return Err("تعذر فتح نافذة البث المباشر للهاتف.".into());
   }
 
-  embed_window(app, found, x, y, width, height)?;
+  place_overlay(app, found, rect)?;
 
   let mut guard = state().lock().map_err(|_| "تعذر قفل حالة البث.".to_string())?;
   guard.child = Some(child);
   guard.hwnd = found;
   guard.serial = serial.to_string();
+  guard.rect = Some(rect);
   Ok(())
 }
 
@@ -270,16 +296,18 @@ pub fn resize(
   width: i32,
   height: i32
 ) -> Result<(), String> {
-  let hwnd = state()
-    .lock()
-    .map_err(|_| "تعذر قفل حالة البث.".to_string())?
-    .hwnd;
+  let rect = MirrorRect { x, y, width, height };
+  let hwnd = {
+    let mut guard = state().lock().map_err(|_| "تعذر قفل حالة البث.".to_string())?;
+    guard.rect = Some(rect);
+    guard.hwnd
+  };
 
   if hwnd == 0 {
     return Ok(());
   }
 
-  embed_window(app, hwnd, x, y, width, height)
+  place_overlay(app, hwnd, rect)
 }
 
 #[cfg(not(target_os = "windows"))]
