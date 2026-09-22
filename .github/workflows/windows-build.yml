@@ -24,6 +24,17 @@ jobs:
           New-Item -ItemType Directory -Force "src-tauri\resources" | Out-Null
           Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile "src-tauri\resources\android-platform-tools.zip"
 
+      - name: Download official scrcpy 4.1
+        shell: pwsh
+        run: |
+          $url = "https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-win64-v4.1.zip"
+          $out = "src-tauri\resources\scrcpy-win64-v4.1.zip"
+          Invoke-WebRequest $url -OutFile $out
+          $sha = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+          if ($sha -ne "5b12172b3264b2889f4583ee64752ce832e29bc8b1089dca81093459697165db") {
+            throw "scrcpy SHA-256 verification failed: $sha"
+          }
+
       - name: Generate H TRANS installer branding
         shell: pwsh
         run: .\\src-tauri\\windows\\generate-installer-assets.ps1
