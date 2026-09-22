@@ -108,7 +108,25 @@ pub fn download_and_install(app: &AppHandle, info: UpdateInfo) -> Result<(), Str
 
   #[cfg(target_os = "windows")]
   {
-    Command::new(&installer).arg("/S").spawn().map_err(|e| e.to_string())?;
+    // Prevent the updater from racing with the ADB server or the running app.
+    crate::android::stop_adb_server(app);
+    std::thread::sleep(std::time::Duration::from_millis(450));
+
+    let installer_text = installer
+      .to_str()
+      .ok_or_else(|| "Invalid installer path.".to_string())?
+      .replace(''', "''");
+
+    let script = format!(
+      "Start-Sleep -Milliseconds 1200; Start-Process -FilePath '{}' -ArgumentList '/S'",
+      installer_text
+    );
+
+    Command::new("powershell")
+      .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+      .spawn()
+      .map_err(|e| e.to_string())?;
+
     app.exit(0);
     Ok(())
   }
