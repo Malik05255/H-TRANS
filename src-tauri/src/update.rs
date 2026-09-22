@@ -6,9 +6,15 @@ use std::{
   fs::File,
   io::{Read, Write},
   path::PathBuf,
-  process::Command
+  process::Command,
+  time::Duration
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const LATEST_URL: &str =
   "https://github.com/Malik05255/H-TRANS/releases/latest/download/latest.json";
@@ -34,6 +40,8 @@ struct UpdateProgress {
 fn client() -> Result<Client, String> {
   Client::builder()
     .user_agent("H-TRANS-Updater")
+    .connect_timeout(Duration::from_secs(3))
+    .timeout(Duration::from_secs(8))
     .build()
     .map_err(|e| e.to_string())
 }
@@ -122,8 +130,13 @@ pub fn download_and_install(app: &AppHandle, info: UpdateInfo) -> Result<(), Str
       installer_text
     );
 
-    Command::new("powershell")
-      .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+    let mut updater = Command::new("powershell");
+    updater
+      .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script]);
+    #[cfg(target_os = "windows")]
+    updater.creation_flags(CREATE_NO_WINDOW);
+
+    updater
       .spawn()
       .map_err(|e| e.to_string())?;
 
