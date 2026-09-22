@@ -9,6 +9,7 @@ import {
   WifiOff
 } from "lucide-react";
 import iconUrl from "./assets/h-trans-icon.svg";
+import { ar, translateBackendError, translateDetail, translateStage } from "./i18n/ar";
 import { backend } from "./lib/backend";
 import type { AndroidDevice, TransferProgress, WhatsAppVariant } from "./types";
 
@@ -30,6 +31,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    document.documentElement.lang = "ar";
+    document.documentElement.dir = "rtl";
+
     refresh();
     const timer = window.setInterval(refresh, 3000);
     let unlisten: (() => void) | undefined;
@@ -51,9 +55,9 @@ export default function App() {
 
   async function doBackup() {
     const destination = await save({
-      title: "Save H TRANS backup",
+      title: ar.saveBackupTitle,
       defaultPath: `H-TRANS_${device?.model || "Android"}_${variant}.htrans`,
-      filters: [{ name: "H TRANS Backup", extensions: ["htrans"] }]
+      filters: [{ name: ar.backupFileType, extensions: ["htrans"] }]
     });
 
     if (!destination) return;
@@ -64,9 +68,9 @@ export default function App() {
 
     try {
       const saved = await backend.backupWhatsApp(variant, destination);
-      setResult(`Backup verified and saved: ${saved}`);
+      setResult(`${ar.backupSaved}: ${saved}`);
     } catch (error) {
-      setResult(`Backup failed: ${String(error)}`);
+      setResult(`${ar.backupFailed}: ${translateBackendError(error)}`);
     } finally {
       setRunning(false);
     }
@@ -74,9 +78,9 @@ export default function App() {
 
   async function doRestore() {
     const selected = await open({
-      title: "Select H TRANS backup",
+      title: ar.selectBackupTitle,
       multiple: false,
-      filters: [{ name: "H TRANS Backup", extensions: ["htrans"] }]
+      filters: [{ name: ar.backupFileType, extensions: ["htrans"] }]
     });
 
     if (!selected || Array.isArray(selected)) return;
@@ -86,20 +90,20 @@ export default function App() {
       const sizeMb = (summary.totalBytes / 1024 / 1024).toFixed(1);
       const approved = await confirm(
         [
-          `This backup contains ${summary.databaseCount} encrypted chat database file(s) (${sizeMb} MB).`,
+          `تحتوي النسخة على ${summary.databaseCount} ملفًا لقاعدة المحادثات بحجم ${sizeMb} ميجابايت.`,
           "",
-          "H TRANS will verify every file first.",
-          "If WhatsApp is already installed, a Safety Backup of the current local chat backups is required before H TRANS replaces any msgstore files.",
-          "Media is never modified.",
+          ar.restoreVerifyNotice,
+          ar.restoreSafetyNotice,
+          ar.restoreMediaNotice,
           "",
-          "Continue?"
+          ar.restoreContinue
         ].join("\n"),
-        { title: "H TRANS Restore", kind: "warning" }
+        { title: ar.restoreDialogTitle, kind: "warning" }
       );
 
       if (!approved) return;
     } catch (error) {
-      setResult(`Cannot open backup: ${String(error)}`);
+      setResult(`${ar.cannotOpenBackup}: ${translateBackendError(error)}`);
       return;
     }
 
@@ -110,13 +114,14 @@ export default function App() {
     try {
       const outcome = await backend.restoreWhatsApp(selected, variant);
       const safety = outcome.safetyBackup
-        ? ` Safety backup: ${outcome.safetyBackup}`
-        : " No safety backup was needed because no existing WhatsApp installation was detected.";
+        ? ` — ${ar.safetyBackup}: ${outcome.safetyBackup}`
+        : ` — ${ar.noSafetyNeeded}`;
+
       setResult(
-        `Restored ${outcome.restoredFiles} chat database file(s).${safety} Complete WhatsApp setup and choose the local backup when prompted.`
+        `${ar.restoredFiles}: ${outcome.restoredFiles}.${safety} ${ar.finishWhatsAppSetup}`
       );
     } catch (error) {
-      setResult(`Restore failed: ${String(error)}`);
+      setResult(`${ar.restoreFailed}: ${translateBackendError(error)}`);
     } finally {
       setRunning(false);
       refresh();
@@ -125,26 +130,31 @@ export default function App() {
 
   const statusText =
     device?.state === "unauthorized"
-      ? "Unlock phone and tap Allow USB debugging"
+      ? ar.unauthorized
       : device?.state === "offline"
-        ? "Reconnect the USB cable"
+        ? ar.offline
         : connected
-          ? "Connected"
-          : "Waiting";
+          ? ar.connected
+          : ar.waiting;
+
+  const progressStage = translateStage(progress.stage);
+  const progressDetail =
+    translateDetail(progress.detail) || (running ? ar.doNotDisconnect : ar.ready);
 
   return (
     <main className="shell">
       <header>
         <div className="brand">
-          <img src={iconUrl} alt="H TRANS" />
+          <img src={iconUrl} alt={ar.appName} />
           <div>
-            <strong>H TRANS</strong>
-            <span>Your chats. Your PC.</span>
+            <strong>{ar.appName}</strong>
+            <span>{ar.tagline}</span>
           </div>
         </div>
+
         <button className="ghost" onClick={refresh} disabled={running}>
-          <RefreshCw size={17} />
-          Refresh
+          <RefreshCw size={16} />
+          {ar.refresh}
         </button>
       </header>
 
@@ -152,8 +162,8 @@ export default function App() {
         <article className="panel device">
           <div className="heading">
             <div>
-              <p className="eyebrow">CONNECTED DEVICE</p>
-              <h1>{connected ? "Android phone detected" : "Connect your Android phone"}</h1>
+              <p className="eyebrow">{ar.connectedDevice}</p>
+              <h1>{connected ? ar.phoneDetected : ar.connectPhone}</h1>
             </div>
             <span className={connected ? "status on" : "status"}>{statusText}</span>
           </div>
@@ -163,19 +173,19 @@ export default function App() {
               <div className="screen">
                 {connected ? (
                   <>
-                    <Smartphone size={48} />
+                    <Smartphone size={40} />
                     <strong>{device?.model}</strong>
                     <span>{device?.manufacturer}</span>
                     <small>Android {device?.androidVersion}</small>
                   </>
                 ) : (
                   <>
-                    <WifiOff size={46} />
-                    <strong>{device?.state === "unauthorized" ? "Authorization required" : "No phone connected"}</strong>
+                    <WifiOff size={38} />
+                    <strong>
+                      {device?.state === "unauthorized" ? ar.authorizationRequired : ar.noPhone}
+                    </strong>
                     <small>
-                      {device?.state === "unauthorized"
-                        ? "Unlock the phone and approve the USB debugging prompt."
-                        : "Connect USB and enable USB debugging."}
+                      {device?.state === "unauthorized" ? ar.usbAuthorizeHelp : ar.usbHelp}
                     </small>
                   </>
                 )}
@@ -183,42 +193,40 @@ export default function App() {
             </div>
 
             <div className="facts">
-              <Fact label="Serial" value={device?.serial || "—"} />
+              <Fact label={ar.serial} value={device?.serial || "—"} />
               <Fact
-                label="Battery"
-                value={device?.batteryLevel != null ? `${device.batteryLevel}%` : "—"}
+                label={ar.battery}
+                value={device?.batteryLevel != null ? `${device.batteryLevel}٪` : "—"}
               />
-              <Fact label="Storage" value={device?.storageSummary || "—"} />
-              <Fact label="Media policy" value="Always excluded" />
+              <Fact label={ar.storage} value={device?.storageSummary || "—"} />
+              <Fact label={ar.mediaPolicy} value={ar.alwaysExcluded} />
             </div>
           </div>
         </article>
 
         <article className="panel actions">
-          <p className="eyebrow">SELECT DATA</p>
-          <h2>WhatsApp chats</h2>
-          <p className="muted">
-            Chats only. Photos, videos, audio and documents are never included or modified.
-          </p>
+          <p className="eyebrow">{ar.selectData}</p>
+          <h2>{ar.whatsappChats}</h2>
+          <p className="muted">{ar.chatsOnlyDescription}</p>
 
           <div className="choices">
             <Choice
               active={variant === "personal"}
-              title="WhatsApp"
-              sub={device?.whatsappInstalled ? "Detected" : "Not detected"}
+              title={ar.whatsapp}
+              sub={device?.whatsappInstalled ? ar.detected : ar.notDetected}
               onClick={() => setVariant("personal")}
             />
             <Choice
               active={variant === "business"}
-              title="WhatsApp Business"
-              sub={device?.whatsappBusinessInstalled ? "Detected" : "Not detected"}
+              title={ar.whatsappBusiness}
+              sub={device?.whatsappBusinessInstalled ? ar.detected : ar.notDetected}
               onClick={() => setVariant("business")}
             />
           </div>
 
           <div className="privacy">
-            <ShieldCheck size={20} />
-            <span>100% local. H TRANS does not upload chat data.</span>
+            <ShieldCheck size={19} />
+            <span>{ar.localOnly}</span>
           </div>
 
           <div className="buttons">
@@ -227,8 +235,8 @@ export default function App() {
               disabled={!connected || !backupSupported || running}
               onClick={doBackup}
             >
-              <HardDriveDownload size={19} />
-              Backup
+              <HardDriveDownload size={18} />
+              {ar.backup}
             </button>
 
             <button
@@ -236,20 +244,20 @@ export default function App() {
               disabled={!connected || running}
               onClick={doRestore}
             >
-              <ArchiveRestore size={19} />
-              Restore
+              <ArchiveRestore size={18} />
+              {ar.restore}
             </button>
           </div>
 
           <div className="progress">
-            <div>
-              <span>{progress.stage}</span>
-              <strong>{progress.percent}%</strong>
+            <div className="progress-head">
+              <span>{progressStage}</span>
+              <strong>{progress.percent}٪</strong>
             </div>
             <div className="track">
               <i style={{ width: `${progress.percent}%` }} />
             </div>
-            <small>{progress.detail || (running ? "Do not disconnect your phone." : "Ready.")}</small>
+            <small>{progressDetail}</small>
           </div>
 
           {result && <p className="result">{result}</p>}
@@ -263,7 +271,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="fact">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong dir="auto">{value}</strong>
     </div>
   );
 }
