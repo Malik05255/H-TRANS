@@ -3,7 +3,7 @@ mod mirror;
 mod update;
 mod whatsapp;
 
-use android::{AndroidDevice, AndroidDiagnostic};
+use android::{AdbPeer, AndroidDevice, AndroidDiagnostic};
 use tauri::AppHandle;
 use update::UpdateInfo;
 use whatsapp::{BackupSummary, RestoreOutcome};
@@ -11,6 +11,11 @@ use whatsapp::{BackupSummary, RestoreOutcome};
 #[tauri::command]
 fn detect_android_device(app: AppHandle) -> Result<Option<AndroidDevice>, String> {
   android::detect_device(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn peek_android_adb(app: AppHandle) -> Result<Option<AdbPeer>, String> {
+  android::peek_adb(&app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -101,6 +106,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       detect_android_device,
+      peek_android_adb,
       diagnose_android_connection,
       repair_android_connection,
       start_live_mirror,

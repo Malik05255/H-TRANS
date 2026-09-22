@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AdbPeer,
   AndroidDevice,
   AndroidDiagnostic,
   BackupSummary,
@@ -13,6 +14,7 @@ import type {
 
 export const backend = {
   detectDevice: () => invoke<AndroidDevice | null>("detect_android_device"),
+  peekAdb: () => invoke<AdbPeer | null>("peek_android_adb"),
   diagnoseConnection: () => invoke<AndroidDiagnostic>("diagnose_android_connection"),
   repairConnection: () => invoke<AndroidDiagnostic>("repair_android_connection"),
 

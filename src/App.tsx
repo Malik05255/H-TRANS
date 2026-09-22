@@ -58,8 +58,9 @@ export default function App() {
   const [updating, setUpdating] = useState(false);
 
   const mirrorRef = useRef<HTMLDivElement>(null);
+  const syncBusy = useRef(false);
   const authorized = device?.state === "connected" && !!device.serial;
-  const usbOnly = device?.state === "usb_only";
+  const usbSeen = !!device || !!diagnostic?.windowsUsbSeen;
 
   const backupSupported = useMemo(
     () =>
@@ -71,10 +72,8 @@ export default function App() {
   function currentMirrorRect() {
     const element = mirrorRef.current;
     if (!element) return null;
-
     const rect = element.getBoundingClientRect();
     const scale = window.devicePixelRatio || 1;
-
     return {
       x: Math.round(rect.left * scale),
       y: Math.round(rect.top * scale),
@@ -100,14 +99,32 @@ export default function App() {
       setMirrorReady(true);
     } catch (error) {
       setMirrorReady(false);
-      setResult("تعذر تشغيل البث المباشر: " + translateBackendError(error));
+      setResult("تعذر تشغيل البث: " + translateBackendError(error));
     } finally {
       setMirrorStarting(false);
     }
   }
 
+  async function loadAuthorizedPhone() {
+    if (syncBusy.current) return;
+    syncBusy.current = true;
+
+    try {
+      const nextDevice = await backend.detectDevice();
+      if (nextDevice?.state === "connected" && nextDevice.serial) {
+        const changed = device?.serial !== nextDevice.serial;
+        setDevice(nextDevice);
+        if (changed || !mirrorReady) {
+          window.setTimeout(() => startMirror(nextDevice.serial), 80);
+        }
+      }
+    } finally {
+      syncBusy.current = false;
+    }
+  }
+
   async function scanPhone() {
-    if (preview) return;
+    if (preview || scanning) return;
 
     setScanning(true);
     setResult("");
@@ -161,12 +178,40 @@ export default function App() {
     backend.onProgress(setProgress).then((fn) => (unlistenTransfer = fn)).catch(() => undefined);
     backend.onUpdateProgress(setUpdateProgress).then((fn) => (unlistenUpdate = fn)).catch(() => undefined);
 
+    // Lightweight ADB watcher only. No PowerShell/PnP scan here.
+    const watcher = preview ? undefined : window.setInterval(async () => {
+      if (scanning || running || syncBusy.current) return;
+      try {
+        const peer = await backend.peekAdb();
+        if (peer?.state === "device") {
+          if (!authorized || device?.serial !== peer.serial) await loadAuthorizedPhone();
+        } else if (peer?.state === "unauthorized") {
+          setDevice((current) => current?.state === "connected" ? current : {
+            serial: peer.serial,
+            state: "unauthorized",
+            manufacturer: "",
+            model: current?.model || "Android",
+            androidVersion: "",
+            whatsappInstalled: false,
+            whatsappBusinessInstalled: false
+          });
+        } else if (authorized && !peer) {
+          await backend.stopLiveMirror().catch(() => undefined);
+          setMirrorReady(false);
+          setDevice(null);
+        }
+      } catch {
+        // Lightweight watcher is intentionally silent.
+      }
+    }, 2500);
+
     return () => {
+      if (watcher) window.clearInterval(watcher);
       unlistenTransfer?.();
       unlistenUpdate?.();
       if (!preview) backend.stopLiveMirror().catch(() => undefined);
     };
-  }, []);
+  }, [authorized, device?.serial, scanning, running, mirrorReady]);
 
   useEffect(() => {
     if (!authorized || preview || !mirrorReady) return;
@@ -179,8 +224,7 @@ export default function App() {
     const observer = new ResizeObserver(resize);
     if (mirrorRef.current) observer.observe(mirrorRef.current);
     window.addEventListener("resize", resize);
-
-    const timer = window.setTimeout(resize, 100);
+    const timer = window.setTimeout(resize, 120);
 
     return () => {
       window.clearTimeout(timer);
@@ -193,7 +237,6 @@ export default function App() {
     if (preview || checkingUpdate) return;
     setCheckingUpdate(true);
     setResult("");
-
     try {
       const info = await backend.checkForUpdate();
       setUpdateInfo(info);
@@ -208,7 +251,6 @@ export default function App() {
   async function installUpdate() {
     if (!updateInfo || preview) return;
     setUpdating(true);
-
     try {
       await backend.installUpdate(updateInfo);
     } catch (error) {
@@ -276,15 +318,32 @@ export default function App() {
   const statusText = authorized
     ? "متصل"
     : device?.state === "unauthorized"
-      ? "وافق من الهاتف"
-      : usbOnly
-        ? "فعّل تصحيح USB"
-        : device?.state === "offline"
-          ? "غير جاهز"
-          : "غير متصل";
+      ? "بانتظار موافقتك"
+      : usbSeen
+        ? "الهاتف موجود"
+        : "غير متصل";
 
-  const actionDisabled =
-    running || (page === "backup" ? !backupSupported : !authorized);
+  const mirrorMessage = authorized
+    ? "جارٍ تجهيز البث المباشر"
+    : device?.state === "unauthorized"
+      ? "وافق على رسالة تصحيح USB في الهاتف"
+      : diagnostic?.code === "adb_interface_missing"
+        ? "فعّل تصحيح USB في الهاتف"
+        : diagnostic?.code === "adb_interface_not_ready"
+          ? "افتح الهاتف ووافق على إذن USB"
+          : usbSeen
+            ? "اضغط فحص الهاتف"
+            : "وصّل الهاتف ثم اضغط فحص";
+
+  const adbLabel = authorized
+    ? "ADB جاهز"
+    : diagnostic?.adbInterfaceSeen
+      ? "ADB ينتظر الهاتف"
+      : usbSeen
+        ? "USB جاهز"
+        : "غير متصل";
+
+  const actionDisabled = running || (page === "backup" ? !backupSupported : !authorized);
 
   return (
     <div className="app-shell">
@@ -309,11 +368,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <button
-            className="update-link"
-            onClick={updateInfo ? installUpdate : checkUpdate}
-            disabled={checkingUpdate || updating}
-          >
+          <button className="update-link" onClick={updateInfo ? installUpdate : checkUpdate} disabled={checkingUpdate || updating}>
             <Download size={17} />
             {updateInfo
               ? updating
@@ -323,7 +378,7 @@ export default function App() {
                 ? "جارٍ الفحص..."
                 : "فحص التحديث"}
           </button>
-          <small>الإصدار 0.6.0</small>
+          <small>الإصدار 0.6.1</small>
         </div>
       </aside>
 
@@ -335,7 +390,7 @@ export default function App() {
           </div>
 
           <div className="header-actions">
-            <span className={authorized ? "status connected" : usbOnly ? "status usb" : "status"}>
+            <span className={authorized ? "status connected" : usbSeen ? "status usb" : "status"}>
               <i />
               {statusText}
             </span>
@@ -355,38 +410,35 @@ export default function App() {
               </div>
               <div className={mirrorReady ? "live-badge on" : "live-badge"}>
                 <i />
-                {mirrorReady ? "LIVE" : mirrorStarting ? "جارٍ التشغيل" : "متوقف"}
+                {mirrorReady ? "LIVE" : mirrorStarting ? "جارٍ التشغيل" : adbLabel}
               </div>
             </div>
 
-            <div className="device-frame">
-              <div className="device-speaker" />
-              <div ref={mirrorRef} className="native-mirror-surface">
-                {!mirrorReady && (
-                  <div className="mirror-placeholder">
-                    <Smartphone size={66} />
-                    <strong>{statusText}</strong>
-                    <span>
-                      {authorized
-                        ? "جارٍ تجهيز البث المباشر"
-                        : usbOnly
-                          ? "فعّل تصحيح USB ثم اضغط فحص الهاتف"
-                          : "وصّل الهاتف واضغط فحص الهاتف"}
-                    </span>
-                  </div>
-                )}
-                {preview && mirrorReady && (
-                  <div className="demo-live">
-                    <Maximize2 size={30} />
-                    <strong>معاينة البث المباشر</strong>
-                    <span>ستظهر شاشة هاتفك الحقيقية هنا</span>
-                  </div>
-                )}
+            <div className="phone-stage">
+              <div className="device-frame">
+                <div className="device-speaker" />
+                <div ref={mirrorRef} className="native-mirror-surface">
+                  {!mirrorReady && (
+                    <div className="mirror-placeholder">
+                      <Smartphone size={54} />
+                      <strong>{statusText}</strong>
+                      <span>{mirrorMessage}</span>
+                    </div>
+                  )}
+                  {preview && mirrorReady && (
+                    <div className="demo-live">
+                      <Maximize2 size={28} />
+                      <strong>معاينة البث المباشر</strong>
+                      <span>ستظهر شاشة هاتفك الحقيقية هنا</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             <div className="device-info">
-              <span>{authorized ? "Android " + device?.androidVersion : statusText}</span>
+              <span>{device?.model || "Android"}</span>
+              {authorized && <span>Android {device?.androidVersion}</span>}
               {device?.batteryLevel != null && <span>{device.batteryLevel}٪ بطارية</span>}
             </div>
           </div>
@@ -395,35 +447,25 @@ export default function App() {
             <span className="control-kicker">البيانات</span>
             <h2>واتساب</h2>
 
-            <button
-              className={variant === "personal" ? "variant active" : "variant"}
-              onClick={() => setVariant("personal")}
-            >
+            <button className={variant === "personal" ? "variant active" : "variant"} onClick={() => setVariant("personal")}>
               <span className="variant-check">{variant === "personal" ? <Check size={16} /> : null}</span>
               <div>
                 <strong>واتساب</strong>
-                <small>{authorized ? (device?.whatsappInstalled ? "جاهز" : "غير مثبت") : "بانتظار الهاتف"}</small>
+                <small>{authorized ? (device?.whatsappInstalled ? "جاهز" : "غير مثبت") : "بانتظار ADB"}</small>
               </div>
             </button>
 
-            <button
-              className={variant === "business" ? "variant active" : "variant"}
-              onClick={() => setVariant("business")}
-            >
+            <button className={variant === "business" ? "variant active" : "variant"} onClick={() => setVariant("business")}>
               <span className="variant-check">{variant === "business" ? <Check size={16} /> : null}</span>
               <div>
                 <strong>واتساب للأعمال</strong>
-                <small>{authorized ? (device?.whatsappBusinessInstalled ? "جاهز" : "غير مثبت") : "بانتظار الهاتف"}</small>
+                <small>{authorized ? (device?.whatsappBusinessInstalled ? "جاهز" : "غير مثبت") : "بانتظار ADB"}</small>
               </div>
             </button>
 
             <div className="simple-note">المحادثات فقط — بدون وسائط</div>
 
-            <button
-              className="primary action"
-              disabled={actionDisabled}
-              onClick={page === "backup" ? doBackup : doRestore}
-            >
+            <button className="primary action" disabled={actionDisabled} onClick={page === "backup" ? doBackup : doRestore}>
               {page === "backup" ? <HardDriveDownload size={20} /> : <ArchiveRestore size={20} />}
               {running
                 ? "جارٍ التنفيذ..."
@@ -438,9 +480,7 @@ export default function App() {
                 <span>{translateDetail(progress.detail) || (running ? "لا تفصل الهاتف" : "جاهز")}</span>
               </div>
               <div className="progress-row">
-                <div className="progress-track">
-                  <i style={{ width: progress.percent + "%" }} />
-                </div>
+                <div className="progress-track"><i style={{ width: progress.percent + "%" }} /></div>
                 <b>{progress.percent}٪</b>
               </div>
             </div>

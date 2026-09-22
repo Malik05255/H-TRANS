@@ -12,11 +12,17 @@ export interface AndroidDevice {
   whatsappBusinessInstalled: boolean;
 }
 
+export interface AdbPeer {
+  serial: string;
+  state: "device" | "unauthorized" | "offline" | string;
+}
+
 export type AndroidDiagnosticCode =
   | "connected"
   | "unauthorized"
   | "offline"
-  | "usb_seen_no_adb"
+  | "adb_interface_not_ready"
+  | "adb_interface_missing"
   | "no_usb_device"
   | "adb_unavailable"
   | "adb_start_failed"

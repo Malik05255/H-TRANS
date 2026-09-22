@@ -51,6 +51,13 @@ pub struct AndroidDevice {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AdbPeer {
+  pub serial: String,
+  pub state: String
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AndroidDiagnostic {
   pub code: String,
   pub adb_available: bool,
@@ -237,6 +244,22 @@ fn parse_devices(stdout: &str) -> Vec<(String, String)> {
       Some((serial, state))
     })
     .collect()
+}
+
+pub fn peek_adb(app: &AppHandle) -> Result<Option<AdbPeer>, AndroidError> {
+  let _ = start_adb_server(app);
+  let output = raw_adb(app, &["devices", "-l"])?;
+  if !output.status.success() {
+    return Ok(None);
+  }
+
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  let selected = parse_devices(&stdout)
+    .into_iter()
+    .find(|(_, state)| state == "device")
+    .or_else(|| parse_devices(&stdout).into_iter().next());
+
+  Ok(selected.map(|(serial, state)| AdbPeer { serial, state }))
 }
 
 #[cfg(target_os = "windows")]
@@ -495,8 +518,16 @@ pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
   }
 
   let probe = windows_phone_probe();
+  let code = if !probe.usb_seen {
+    "no_usb_device"
+  } else if probe.adb_interface_seen {
+    "adb_interface_not_ready"
+  } else {
+    "adb_interface_missing"
+  };
+
   diagnostic(
-    if probe.usb_seen { "usb_seen_no_adb" } else { "no_usb_device" },
+    code,
     true,
     true,
     false,
@@ -511,13 +542,20 @@ pub fn repair_connection(app: &AppHandle) -> AndroidDiagnostic {
   clear_windows_probe_cache();
 
   let _ = hidden_command(&path).arg("kill-server").output();
-  thread::sleep(Duration::from_millis(300));
+  thread::sleep(Duration::from_millis(250));
 
   let _ = hidden_command(&path).arg("start-server").output();
-  thread::sleep(Duration::from_millis(450));
+  thread::sleep(Duration::from_millis(350));
 
-  let _ = hidden_command(&path).arg("reconnect").output();
-  thread::sleep(Duration::from_millis(250));
+  // Give Windows/Android time to expose the ADB interface and the RSA prompt.
+  for _ in 0..12 {
+    if let Ok(Some(peer)) = peek_adb(app) {
+      if peer.state == "device" || peer.state == "unauthorized" || peer.state == "offline" {
+        return diagnose_connection(app);
+      }
+    }
+    thread::sleep(Duration::from_millis(400));
+  }
 
   diagnose_connection(app)
 }
