@@ -115,7 +115,7 @@ pub fn download_and_install(app: &AppHandle, info: UpdateInfo) -> Result<(), Str
     let installer_text = installer
       .to_str()
       .ok_or_else(|| "Invalid installer path.".to_string())?
-      .replace(''', "''");
+      .replace(char::from(39), "''");
 
     let script = format!(
       "Start-Sleep -Milliseconds 1200; Start-Process -FilePath '{}' -ArgumentList '/S'",
