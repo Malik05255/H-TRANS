@@ -1,4 +1,5 @@
 mod android;
+mod mirror;
 mod update;
 mod whatsapp;
 
@@ -23,8 +24,31 @@ fn repair_android_connection(app: AppHandle) -> AndroidDiagnostic {
 }
 
 #[tauri::command]
-fn capture_android_screen(app: AppHandle, serial: String) -> Result<String, String> {
-  android::capture_screen(&app, &serial).map_err(|e| e.to_string())
+fn start_live_mirror(
+  app: AppHandle,
+  serial: String,
+  x: i32,
+  y: i32,
+  width: i32,
+  height: i32
+) -> Result<(), String> {
+  mirror::start(&app, &serial, x, y, width, height)
+}
+
+#[tauri::command]
+fn resize_live_mirror(
+  app: AppHandle,
+  x: i32,
+  y: i32,
+  width: i32,
+  height: i32
+) -> Result<(), String> {
+  mirror::resize(&app, x, y, width, height)
+}
+
+#[tauri::command]
+fn stop_live_mirror() {
+  mirror::stop();
 }
 
 #[tauri::command]
@@ -58,7 +82,11 @@ fn backup_whatsapp(app: AppHandle, variant: String, destination: String) -> Resu
 }
 
 #[tauri::command]
-fn restore_whatsapp(app: AppHandle, backup_file: String, variant: String) -> Result<RestoreOutcome, String> {
+fn restore_whatsapp(
+  app: AppHandle,
+  backup_file: String,
+  variant: String
+) -> Result<RestoreOutcome, String> {
   whatsapp::restore(&app, &backup_file, &variant).map_err(|e| e.to_string())
 }
 
@@ -66,11 +94,18 @@ fn restore_whatsapp(app: AppHandle, backup_file: String, variant: String) -> Res
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .on_window_event(|_, event| {
+      if matches!(event, tauri::WindowEvent::Destroyed) {
+        mirror::stop();
+      }
+    })
     .invoke_handler(tauri::generate_handler![
       detect_android_device,
       diagnose_android_connection,
       repair_android_connection,
-      capture_android_screen,
+      start_live_mirror,
+      resize_live_mirror,
+      stop_live_mirror,
       pair_wireless_android,
       connect_wireless_android,
       check_for_update,
