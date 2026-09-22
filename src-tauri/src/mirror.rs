@@ -17,9 +17,9 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::{
-  Foundation::{HWND, POINT},
+  Foundation::HWND,
   UI::WindowsAndMessaging::{
-    ClientToScreen, FindWindowW, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    FindWindowW, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     GWL_STYLE, GWLP_HWNDPARENT, HWND_TOP, SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_SHOW,
     WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE
   }
@@ -140,17 +140,12 @@ fn screen_rect(app: &AppHandle, rect: MirrorRect) -> Result<(HWND, i32, i32, i32
     .ok_or_else(|| "تعذر العثور على نافذة H TRANS.".to_string())?;
   let raw = window.hwnd().map_err(|e| e.to_string())?;
   let parent = raw.0 as HWND;
-
-  let mut point = POINT { x: rect.x, y: rect.y };
-  let ok = unsafe { ClientToScreen(parent, &mut point) };
-  if ok == 0 {
-    return Err("تعذر تحديد موضع شاشة الهاتف.".into());
-  }
+  let inner = window.inner_position().map_err(|e| e.to_string())?;
 
   Ok((
     parent,
-    point.x,
-    point.y,
+    inner.x.saturating_add(rect.x),
+    inner.y.saturating_add(rect.y),
     rect.width.max(1),
     rect.height.max(1)
   ))
