@@ -2,40 +2,89 @@ import { useEffect, useMemo, useState } from "react";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   ArchiveRestore,
+  Cable,
   HardDriveDownload,
   RefreshCw,
   ShieldCheck,
   Smartphone,
+  Wrench,
   WifiOff
 } from "lucide-react";
 import iconUrl from "./assets/h-trans-icon.svg";
-import { ar, translateBackendError, translateDetail, translateStage } from "./i18n/ar";
+import {
+  ar,
+  diagnosticText,
+  translateBackendError,
+  translateDetail,
+  translateStage
+} from "./i18n/ar";
 import { backend } from "./lib/backend";
-import type { AndroidDevice, TransferProgress, WhatsAppVariant } from "./types";
+import type {
+  AndroidDevice,
+  AndroidDiagnostic,
+  TransferProgress,
+  WhatsAppVariant
+} from "./types";
 
 const idle: TransferProgress = { operation: "backup", percent: 0, stage: "Ready" };
 
 export default function App() {
   const [device, setDevice] = useState<AndroidDevice | null>(null);
+  const [diagnostic, setDiagnostic] = useState<AndroidDiagnostic | null>(null);
   const [variant, setVariant] = useState<WhatsAppVariant>("personal");
   const [progress, setProgress] = useState<TransferProgress>(idle);
   const [running, setRunning] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [result, setResult] = useState("");
 
   const refresh = async () => {
     try {
-      setDevice(await backend.detectDevice());
+      const nextDevice = await backend.detectDevice();
+      setDevice(nextDevice);
+
+      if (nextDevice?.state === "connected") {
+        setDiagnostic({
+          code: "connected",
+          adbAvailable: true,
+          adbServerRunning: true,
+          adbPath: "",
+          windowsUsbSeen: true
+        });
+      } else {
+        setDiagnostic(await backend.diagnoseConnection());
+      }
     } catch {
       setDevice(null);
+      try {
+        setDiagnostic(await backend.diagnoseConnection());
+      } catch {
+        setDiagnostic(null);
+      }
     }
   };
+
+  async function repairConnection() {
+    setRepairing(true);
+    setResult("");
+
+    try {
+      const nextDiagnostic = await backend.repairConnection();
+      setDiagnostic(nextDiagnostic);
+      const nextDevice = await backend.detectDevice();
+      setDevice(nextDevice);
+    } catch (error) {
+      setResult(translateBackendError(error));
+    } finally {
+      setRepairing(false);
+    }
+  }
 
   useEffect(() => {
     document.documentElement.lang = "ar";
     document.documentElement.dir = "rtl";
 
     refresh();
-    const timer = window.setInterval(refresh, 3000);
+    const timer = window.setInterval(refresh, 2000);
     let unlisten: (() => void) | undefined;
     backend.onProgress(setProgress).then((fn) => (unlisten = fn));
 
@@ -137,6 +186,7 @@ export default function App() {
           ? ar.connected
           : ar.waiting;
 
+  const diagnosticCopy = diagnostic ? diagnosticText(diagnostic.code) : null;
   const progressStage = translateStage(progress.stage);
   const progressDetail =
     translateDetail(progress.detail) || (running ? ar.doNotDisconnect : ar.ready);
@@ -152,7 +202,7 @@ export default function App() {
           </div>
         </div>
 
-        <button className="ghost" onClick={refresh} disabled={running}>
+        <button className="ghost" onClick={refresh} disabled={running || repairing}>
           <RefreshCw size={16} />
           {ar.refresh}
         </button>
@@ -182,10 +232,14 @@ export default function App() {
                   <>
                     <WifiOff size={38} />
                     <strong>
-                      {device?.state === "unauthorized" ? ar.authorizationRequired : ar.noPhone}
+                      {device?.state === "unauthorized"
+                        ? ar.authorizationRequired
+                        : diagnosticCopy?.title || ar.noPhone}
                     </strong>
                     <small>
-                      {device?.state === "unauthorized" ? ar.usbAuthorizeHelp : ar.usbHelp}
+                      {device?.state === "unauthorized"
+                        ? ar.usbAuthorizeHelp
+                        : diagnosticCopy?.detail || ar.usbHelp}
                     </small>
                   </>
                 )}
@@ -193,13 +247,54 @@ export default function App() {
             </div>
 
             <div className="facts">
-              <Fact label={ar.serial} value={device?.serial || "—"} />
-              <Fact
-                label={ar.battery}
-                value={device?.batteryLevel != null ? `${device.batteryLevel}٪` : "—"}
-              />
-              <Fact label={ar.storage} value={device?.storageSummary || "—"} />
-              <Fact label={ar.mediaPolicy} value={ar.alwaysExcluded} />
+              {connected ? (
+                <>
+                  <Fact label={ar.serial} value={device?.serial || "—"} />
+                  <Fact
+                    label={ar.battery}
+                    value={device?.batteryLevel != null ? `${device.batteryLevel}٪` : "—"}
+                  />
+                  <Fact label={ar.storage} value={device?.storageSummary || "—"} />
+                  <Fact label={ar.mediaPolicy} value={ar.alwaysExcluded} />
+                </>
+              ) : (
+                <div className="connection-card">
+                  <div className="connection-title">
+                    <Cable size={20} />
+                    <div>
+                      <span>{ar.connectionCheck}</span>
+                      <strong>{diagnosticCopy?.title || ar.waiting}</strong>
+                    </div>
+                  </div>
+
+                  <p>{diagnosticCopy?.detail || ar.usbHelp}</p>
+
+                  {diagnostic?.windowsDeviceName && (
+                    <div className="detected-usb">
+                      <span>{ar.usbDetected}</span>
+                      <strong dir="auto">{diagnostic.windowsDeviceName}</strong>
+                    </div>
+                  )}
+
+                  <div className="diagnostic-flags">
+                    <span className={diagnostic?.adbAvailable ? "ok" : ""}>
+                      ADB {diagnostic?.adbAvailable ? "✓" : "×"}
+                    </span>
+                    <span className={diagnostic?.windowsUsbSeen ? "ok" : ""}>
+                      USB {diagnostic?.windowsUsbSeen ? "✓" : "×"}
+                    </span>
+                  </div>
+
+                  <button
+                    className="repair"
+                    onClick={repairConnection}
+                    disabled={repairing || running}
+                  >
+                    <Wrench size={17} />
+                    {repairing ? ar.repairingConnection : ar.repairConnection}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </article>

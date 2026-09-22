@@ -1,7 +1,11 @@
+import type { AndroidDiagnosticCode } from "../types";
+
 export const ar = {
   appName: "H TRANS",
   tagline: "محادثاتك على جهازك",
   refresh: "تحديث",
+  repairConnection: "إصلاح الاتصال",
+  repairingConnection: "جارٍ إصلاح الاتصال...",
   connectedDevice: "الجهاز المتصل",
   phoneDetected: "تم التعرف على هاتف Android",
   connectPhone: "قم بتوصيل هاتف Android",
@@ -13,6 +17,9 @@ export const ar = {
   noPhone: "لا يوجد هاتف متصل",
   usbHelp: "قم بتوصيل USB وتفعيل تصحيح USB.",
   usbAuthorizeHelp: "افتح الهاتف ووافق على رسالة تصحيح USB.",
+  connectionCheck: "تشخيص الاتصال",
+  usbDetected: "تم رصد الهاتف في Windows",
+  adbReady: "محرك ADB جاهز",
   serial: "الرقم التسلسلي",
   battery: "البطارية",
   storage: "التخزين",
@@ -49,6 +56,45 @@ export const ar = {
   noSafetyNeeded: "لم تكن هناك حاجة لنسخة أمان لأن واتساب غير مثبت حاليًا.",
   finishWhatsAppSetup: "أكمل إعداد واتساب واختر النسخة المحلية عندما تظهر لك شاشة الاستعادة."
 } as const;
+
+const diagnosticMap: Record<AndroidDiagnosticCode, { title: string; detail: string }> = {
+  connected: {
+    title: "الهاتف متصل وجاهز",
+    detail: "تم التعرف على الهاتف عبر ADB ويمكن لـ H TRANS التواصل معه."
+  },
+  unauthorized: {
+    title: "الهاتف ظاهر لكن لم يتم السماح له",
+    detail: "افتح قفل الهاتف. ستظهر رسالة السماح بتصحيح USB؛ اختر «السماح دائمًا من هذا الكمبيوتر» ثم اضغط سماح."
+  },
+  offline: {
+    title: "الهاتف ظاهر بحالة غير متصلة",
+    detail: "افصل كابل USB وأعد توصيله، ثم اضغط «إصلاح الاتصال»."
+  },
+  usb_seen_no_adb: {
+    title: "Windows يرى الهاتف لكن ADB لا يراه",
+    detail: "غيّر وضع USB في الهاتف إلى «نقل الملفات»، فعّل «خيارات المطور» ثم «تصحيح USB»، ووافق على رسالة بصمة RSA. إذا استمرت المشكلة فقد يحتاج Windows إلى تعريف USB الخاص بالشركة المصنعة."
+  },
+  no_usb_device: {
+    title: "لم يتم رصد هاتف Android عبر USB",
+    detail: "استخدم كابل بيانات وليس كابل شحن فقط، جرّب منفذ USB آخر، وافتح شاشة الهاتف ثم اختر «نقل الملفات» من خيارات USB."
+  },
+  adb_unavailable: {
+    title: "تعذر تشغيل محرك ADB",
+    detail: "ملفات Android Platform Tools غير متاحة داخل H TRANS. ثبّت أحدث نسخة رسمية من التطبيق."
+  },
+  adb_start_failed: {
+    title: "تعذر تشغيل خدمة ADB",
+    detail: "أغلق أي برنامج آخر يستخدم ADB ثم اضغط «إصلاح الاتصال»."
+  },
+  adb_error: {
+    title: "حدث خطأ أثناء فحص اتصال Android",
+    detail: "اضغط «إصلاح الاتصال». إذا استمرت المشكلة أعد توصيل الهاتف وافتح قفله."
+  }
+};
+
+export function diagnosticText(code: AndroidDiagnosticCode) {
+  return diagnosticMap[code];
+}
 
 const stageMap: Record<string, string> = {
   Ready: ar.ready,

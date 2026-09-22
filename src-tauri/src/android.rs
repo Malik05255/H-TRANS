@@ -1,7 +1,9 @@
 use serde::Serialize;
 use std::{
   path::PathBuf,
-  process::{Command, Output}
+  process::{Command, Output},
+  thread,
+  time::Duration
 };
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
@@ -28,6 +30,18 @@ pub struct AndroidDevice {
   pub whatsapp_business_installed: bool
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AndroidDiagnostic {
+  pub code: String,
+  pub adb_available: bool,
+  pub adb_server_running: bool,
+  pub adb_path: String,
+  pub windows_usb_seen: bool,
+  pub windows_device_name: Option<String>,
+  pub raw_adb: Option<String>
+}
+
 pub fn adb_path(app: &AppHandle) -> PathBuf {
   if let Ok(custom) = std::env::var("HTRANS_ADB") {
     return PathBuf::from(custom);
@@ -49,11 +63,15 @@ pub fn adb_path(app: &AppHandle) -> PathBuf {
   PathBuf::from("adb")
 }
 
-pub fn adb(app: &AppHandle, args: &[&str]) -> Result<Output, AndroidError> {
-  let output = Command::new(adb_path(app))
+fn raw_adb(app: &AppHandle, args: &[&str]) -> Result<Output, AndroidError> {
+  Command::new(adb_path(app))
     .args(args)
     .output()
-    .map_err(|_| AndroidError::AdbUnavailable)?;
+    .map_err(|_| AndroidError::AdbUnavailable)
+}
+
+pub fn adb(app: &AppHandle, args: &[&str]) -> Result<Output, AndroidError> {
+  let output = raw_adb(app, args)?;
 
   if output.status.success() {
     Ok(output)
@@ -64,24 +82,223 @@ pub fn adb(app: &AppHandle, args: &[&str]) -> Result<Output, AndroidError> {
   }
 }
 
+pub fn start_adb_server(app: &AppHandle) -> Result<(), AndroidError> {
+  let version = raw_adb(app, &["version"])?;
+  if !version.status.success() {
+    return Err(AndroidError::CommandFailed(
+      String::from_utf8_lossy(&version.stderr).trim().to_string()
+    ));
+  }
+
+  let started = raw_adb(app, &["start-server"])?;
+  if started.status.success() {
+    Ok(())
+  } else {
+    Err(AndroidError::CommandFailed(
+      String::from_utf8_lossy(&started.stderr).trim().to_string()
+    ))
+  }
+}
+
 fn text(app: &AppHandle, serial: &str, args: &[&str]) -> Result<String, AndroidError> {
   let mut all = vec!["-s", serial];
   all.extend_from_slice(args);
   Ok(String::from_utf8_lossy(&adb(app, &all)?.stdout).trim().to_string())
 }
 
+fn parse_devices(stdout: &str) -> Vec<(String, String)> {
+  stdout
+    .lines()
+    .skip(1)
+    .filter_map(|line| {
+      let trimmed = line.trim();
+      if trimmed.is_empty() {
+        return None;
+      }
+
+      let mut parts = trimmed.split_whitespace();
+      let serial = parts.next()?.to_string();
+      let state = parts.next()?.to_string();
+      Some((serial, state))
+    })
+    .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_phone_probe() -> (bool, Option<String>) {
+  let script = r#"
+$patterns = 'Android|ADB|MTP|Samsung|Galaxy|Pixel|Xiaomi|Redmi|POCO|OnePlus|OPPO|vivo|HONOR|HUAWEI|Motorola|realme|Nothing'
+$items = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.FriendlyName -and
+    ($_.FriendlyName -match $patterns -or $_.Class -eq 'AndroidUsbDeviceClass')
+  } |
+  Select-Object -ExpandProperty FriendlyName
+$items | Select-Object -First 5
+"#;
+
+  let output = Command::new("powershell")
+    .args(["-NoProfile", "-NonInteractive", "-Command", script])
+    .output();
+
+  let Ok(output) = output else {
+    return (false, None);
+  };
+
+  let names = String::from_utf8_lossy(&output.stdout);
+  let first = names
+    .lines()
+    .map(str::trim)
+    .find(|line| !line.is_empty())
+    .map(str::to_string);
+
+  (first.is_some(), first)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_phone_probe() -> (bool, Option<String>) {
+  (false, None)
+}
+
+pub fn diagnose_connection(app: &AppHandle) -> AndroidDiagnostic {
+  let path = adb_path(app);
+  let adb_path_text = path.display().to_string();
+
+  let version = Command::new(&path).arg("version").output();
+  let Ok(version) = version else {
+    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
+    return AndroidDiagnostic {
+      code: "adb_unavailable".into(),
+      adb_available: false,
+      adb_server_running: false,
+      adb_path: adb_path_text,
+      windows_usb_seen,
+      windows_device_name,
+      raw_adb: None
+    };
+  };
+
+  if !version.status.success() {
+    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
+    return AndroidDiagnostic {
+      code: "adb_unavailable".into(),
+      adb_available: false,
+      adb_server_running: false,
+      adb_path: adb_path_text,
+      windows_usb_seen,
+      windows_device_name,
+      raw_adb: Some(String::from_utf8_lossy(&version.stderr).trim().to_string())
+    };
+  }
+
+  let server = Command::new(&path).arg("start-server").output();
+  let server_running = server.as_ref().map(|out| out.status.success()).unwrap_or(false);
+
+  if !server_running {
+    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
+    let raw = server
+      .ok()
+      .map(|out| String::from_utf8_lossy(&out.stderr).trim().to_string());
+
+    return AndroidDiagnostic {
+      code: "adb_start_failed".into(),
+      adb_available: true,
+      adb_server_running: false,
+      adb_path: adb_path_text,
+      windows_usb_seen,
+      windows_device_name,
+      raw_adb: raw
+    };
+  }
+
+  let devices = Command::new(&path).args(["devices", "-l"]).output();
+  let Ok(devices) = devices else {
+    let (windows_usb_seen, windows_device_name) = windows_phone_probe();
+    return AndroidDiagnostic {
+      code: "adb_error".into(),
+      adb_available: true,
+      adb_server_running: true,
+      adb_path: adb_path_text,
+      windows_usb_seen,
+      windows_device_name,
+      raw_adb: None
+    };
+  };
+
+  let stdout = String::from_utf8_lossy(&devices.stdout).to_string();
+  let parsed = parse_devices(&stdout);
+
+  if parsed.iter().any(|(_, state)| state == "device") {
+    return AndroidDiagnostic {
+      code: "connected".into(),
+      adb_available: true,
+      adb_server_running: true,
+      adb_path: adb_path_text,
+      windows_usb_seen: true,
+      windows_device_name: None,
+      raw_adb: Some(stdout)
+    };
+  }
+
+  if parsed.iter().any(|(_, state)| state == "unauthorized") {
+    return AndroidDiagnostic {
+      code: "unauthorized".into(),
+      adb_available: true,
+      adb_server_running: true,
+      adb_path: adb_path_text,
+      windows_usb_seen: true,
+      windows_device_name: None,
+      raw_adb: Some(stdout)
+    };
+  }
+
+  if parsed.iter().any(|(_, state)| state == "offline") {
+    return AndroidDiagnostic {
+      code: "offline".into(),
+      adb_available: true,
+      adb_server_running: true,
+      adb_path: adb_path_text,
+      windows_usb_seen: true,
+      windows_device_name: None,
+      raw_adb: Some(stdout)
+    };
+  }
+
+  let (windows_usb_seen, windows_device_name) = windows_phone_probe();
+
+  AndroidDiagnostic {
+    code: if windows_usb_seen {
+      "usb_seen_no_adb".into()
+    } else {
+      "no_usb_device".into()
+    },
+    adb_available: true,
+    adb_server_running: true,
+    adb_path: adb_path_text,
+    windows_usb_seen,
+    windows_device_name,
+    raw_adb: Some(stdout)
+  }
+}
+
+pub fn repair_connection(app: &AppHandle) -> AndroidDiagnostic {
+  let path = adb_path(app);
+  let _ = Command::new(&path).arg("kill-server").output();
+  thread::sleep(Duration::from_millis(350));
+  let _ = Command::new(&path).arg("start-server").output();
+  thread::sleep(Duration::from_millis(700));
+  diagnose_connection(app)
+}
+
 pub fn detect_device(app: &AppHandle) -> Result<Option<AndroidDevice>, AndroidError> {
-  let output = adb(app, &["devices"])?;
+  let _ = start_adb_server(app);
+
+  let output = adb(app, &["devices", "-l"])?;
   let stdout = String::from_utf8_lossy(&output.stdout);
 
   let mut selected: Option<(String, String)> = None;
-  for line in stdout.lines().skip(1) {
-    let mut parts = line.split_whitespace();
-    let (Some(serial), Some(state)) = (parts.next(), parts.next()) else {
-      continue;
-    };
-
-    selected = Some((serial.to_string(), state.to_string()));
+  for (serial, state) in parse_devices(&stdout) {
+    selected = Some((serial, state.clone()));
     if state == "device" {
       break;
     }
@@ -127,7 +344,7 @@ pub fn detect_device(app: &AppHandle) -> Result<Option<AndroidDevice>, AndroidEr
   let storage_summary = storage.lines().last().map(|line| {
     let columns: Vec<&str> = line.split_whitespace().collect();
     if columns.len() >= 5 {
-      format!("{} used / {} total", columns[2], columns[1])
+      format!("{} مستخدم / {} إجمالي", columns[2], columns[1])
     } else {
       line.to_string()
     }

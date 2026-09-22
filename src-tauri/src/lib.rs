@@ -1,13 +1,23 @@
 mod android;
 mod whatsapp;
 
-use android::AndroidDevice;
+use android::{AndroidDevice, AndroidDiagnostic};
 use tauri::AppHandle;
 use whatsapp::{BackupSummary, RestoreOutcome};
 
 #[tauri::command]
 fn detect_android_device(app: AppHandle) -> Result<Option<AndroidDevice>, String> {
   android::detect_device(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn diagnose_android_connection(app: AppHandle) -> AndroidDiagnostic {
+  android::diagnose_connection(&app)
+}
+
+#[tauri::command]
+fn repair_android_connection(app: AppHandle) -> AndroidDiagnostic {
+  android::repair_connection(&app)
 }
 
 #[tauri::command]
@@ -33,8 +43,17 @@ fn restore_whatsapp(
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .setup(|app| {
+      let handle = app.handle().clone();
+      std::thread::spawn(move || {
+        let _ = android::start_adb_server(&handle);
+      });
+      Ok(())
+    })
     .invoke_handler(tauri::generate_handler![
       detect_android_device,
+      diagnose_android_connection,
+      repair_android_connection,
       inspect_htrans_backup,
       backup_whatsapp,
       restore_whatsapp

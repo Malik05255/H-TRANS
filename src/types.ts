@@ -12,6 +12,26 @@ export interface AndroidDevice {
   whatsappBusinessInstalled: boolean;
 }
 
+export type AndroidDiagnosticCode =
+  | "connected"
+  | "unauthorized"
+  | "offline"
+  | "usb_seen_no_adb"
+  | "no_usb_device"
+  | "adb_unavailable"
+  | "adb_start_failed"
+  | "adb_error";
+
+export interface AndroidDiagnostic {
+  code: AndroidDiagnosticCode;
+  adbAvailable: boolean;
+  adbServerRunning: boolean;
+  adbPath: string;
+  windowsUsbSeen: boolean;
+  windowsDeviceName?: string | null;
+  rawAdb?: string | null;
+}
+
 export interface TransferProgress {
   operation: "backup" | "restore";
   percent: number;
