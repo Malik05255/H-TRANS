@@ -29,26 +29,8 @@ fn repair_android_connection(app: AppHandle) -> AndroidDiagnostic {
 }
 
 #[tauri::command]
-fn start_live_mirror(
-  app: AppHandle,
-  serial: String,
-  x: i32,
-  y: i32,
-  width: i32,
-  height: i32
-) -> Result<(), String> {
-  mirror::start(&app, &serial, x, y, width, height)
-}
-
-#[tauri::command]
-fn resize_live_mirror(
-  app: AppHandle,
-  x: i32,
-  y: i32,
-  width: i32,
-  height: i32
-) -> Result<(), String> {
-  mirror::resize(&app, x, y, width, height)
+fn start_live_mirror(app: AppHandle, serial: String) -> Result<u64, String> {
+  mirror::start(&app, &serial)
 }
 
 #[tauri::command]
@@ -118,7 +100,6 @@ pub fn run() {
       diagnose_android_connection,
       repair_android_connection,
       start_live_mirror,
-      resize_live_mirror,
       stop_live_mirror,
       pair_wireless_android,
       connect_wireless_android,

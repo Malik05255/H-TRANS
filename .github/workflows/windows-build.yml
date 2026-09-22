@@ -14,7 +14,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -24,20 +24,20 @@ jobs:
           New-Item -ItemType Directory -Force "src-tauri\resources" | Out-Null
           Invoke-WebRequest "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile "src-tauri\resources\android-platform-tools.zip"
 
-      - name: Download official scrcpy 4.1
+      - name: Download pinned scrcpy server
         shell: pwsh
         run: |
-          $url = "https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-win64-v4.1.zip"
-          $out = "src-tauri\resources\scrcpy-win64-v4.1.zip"
+          $url = "https://github.com/Genymobile/scrcpy/releases/download/v3.3.4/scrcpy-server-v3.3.4"
+          $out = "src-tauri\resources\scrcpy-server-v3.3.4"
           Invoke-WebRequest $url -OutFile $out
           $sha = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
-          if ($sha -ne "5b12172b3264b2889f4583ee64752ce832e29bc8b1089dca81093459697165db") {
-            throw "scrcpy SHA-256 verification failed: $sha"
+          if ($sha -ne "8588238c9a5a00aa542906b6ec7e6d5541d9ffb9b5d0f6e1bc0e365e2303079e") {
+            throw "scrcpy-server SHA-256 verification failed: $sha"
           }
 
       - name: Generate H TRANS installer branding
         shell: pwsh
-        run: .\\src-tauri\\windows\\generate-installer-assets.ps1
+        run: .\src-tauri\windows\generate-installer-assets.ps1
 
       - name: Install frontend dependencies
         run: npm install

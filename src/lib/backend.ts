@@ -5,11 +5,13 @@ import type {
   AndroidDevice,
   AndroidDiagnostic,
   BackupSummary,
+  MirrorFrame,
+  MirrorStatus,
   RestoreOutcome,
-  WhatsAppReadProbe,
   TransferProgress,
   UpdateInfo,
   UpdateProgress,
+  WhatsAppReadProbe,
   WhatsAppVariant
 } from "../types";
 
@@ -19,26 +21,8 @@ export const backend = {
   diagnoseConnection: () => invoke<AndroidDiagnostic>("diagnose_android_connection"),
   repairConnection: () => invoke<AndroidDiagnostic>("repair_android_connection"),
 
-  startLiveMirror: (
-    serial: string,
-    rect: { x: number; y: number; width: number; height: number }
-  ) =>
-    invoke<void>("start_live_mirror", {
-      serial,
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height
-    }),
-
-  resizeLiveMirror: (rect: { x: number; y: number; width: number; height: number }) =>
-    invoke<void>("resize_live_mirror", {
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height
-    }),
-
+  startLiveMirror: (serial: string) =>
+    invoke<number>("start_live_mirror", { serial }),
   stopLiveMirror: () => invoke<void>("stop_live_mirror"),
 
   pairWireless: (endpoint: string, code: string) =>
@@ -59,6 +43,10 @@ export const backend = {
   restoreWhatsApp: (backupFile: string, variant: WhatsAppVariant) =>
     invoke<RestoreOutcome>("restore_whatsapp", { backupFile, variant }),
 
+  onMirrorFrame: (handler: (frame: MirrorFrame) => void): Promise<UnlistenFn> =>
+    listen<MirrorFrame>("mirror-frame", (event) => handler(event.payload)),
+  onMirrorStatus: (handler: (status: MirrorStatus) => void): Promise<UnlistenFn> =>
+    listen<MirrorStatus>("mirror-status", (event) => handler(event.payload)),
   onProgress: (handler: (progress: TransferProgress) => void): Promise<UnlistenFn> =>
     listen<TransferProgress>("transfer-progress", (event) => handler(event.payload)),
   onUpdateProgress: (handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> =>

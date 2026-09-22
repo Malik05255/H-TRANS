@@ -541,20 +541,42 @@ pub fn repair_connection(app: &AppHandle) -> AndroidDiagnostic {
   let path = adb_path(app);
   clear_windows_probe_cache();
 
-  let _ = hidden_command(&path).arg("kill-server").output();
-  thread::sleep(Duration::from_millis(250));
+  if start_adb_server(app).is_err() {
+    return diagnose_connection(app);
+  }
 
-  let _ = hidden_command(&path).arg("start-server").output();
-  thread::sleep(Duration::from_millis(350));
+  // Do not kill the ADB server on every scan. That was dropping valid USB and
+  // wireless sessions and could also dismiss an in-progress RSA authorization.
+  if let Ok(Some(peer)) = peek_adb(app) {
+    if peer.state == "device" || peer.state == "unauthorized" || peer.state == "offline" {
+      return diagnose_connection(app);
+    }
+  }
 
-  // Give Windows/Android time to expose the ADB interface and the RSA prompt.
-  for _ in 0..12 {
+  // If Windows sees only MTP/WPD and no Android ADB interface, retries cannot
+  // fix it. Return immediately so the UI can ask for USB debugging or wireless
+  // debugging instead of pretending ADB is still "waiting".
+  let probe = windows_phone_probe_uncached();
+  if probe.usb_seen && !probe.adb_interface_seen {
+    if let Ok(mut guard) = WINDOWS_PROBE_CACHE
+      .get_or_init(|| Mutex::new(None))
+      .lock()
+    {
+      *guard = Some((Instant::now(), probe));
+    }
+    return diagnose_connection(app);
+  }
+
+  // An ADB interface exists. Ask ADB to refresh stale/offline transports, then
+  // wait briefly for Android's RSA authorization prompt.
+  let _ = hidden_command(&path).args(["reconnect", "offline"]).output();
+  for _ in 0..15 {
     if let Ok(Some(peer)) = peek_adb(app) {
       if peer.state == "device" || peer.state == "unauthorized" || peer.state == "offline" {
         return diagnose_connection(app);
       }
     }
-    thread::sleep(Duration::from_millis(400));
+    thread::sleep(Duration::from_millis(350));
   }
 
   diagnose_connection(app)

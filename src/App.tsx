@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArchiveRestore,
   Check,
   Download,
   HardDriveDownload,
-  Maximize2,
+  Link,
   RefreshCw,
-  Smartphone
+  Smartphone,
+  Wifi
 } from "lucide-react";
 import iconUrl from "./assets/h-trans-icon.svg";
 import { ar, translateBackendError, translateDetail, translateStage } from "./i18n/ar";
@@ -16,16 +16,19 @@ import { backend } from "./lib/backend";
 import type {
   AndroidDevice,
   AndroidDiagnostic,
+  MirrorFrame,
+  MirrorStatus,
   TransferProgress,
-  WhatsAppReadProbe,
   UpdateInfo,
   UpdateProgress,
+  WhatsAppReadProbe,
   WhatsAppVariant
 } from "./types";
 
 type Page = "backup" | "restore";
 const idle: TransferProgress = { operation: "backup", percent: 0, stage: "Ready" };
 const preview = new URLSearchParams(window.location.search).get("preview");
+const previewConnected = preview === "connected" || preview === "update";
 
 function formatBytes(bytes: number) {
   if (!bytes) return "0 MB";
@@ -34,87 +37,129 @@ function formatBytes(bytes: number) {
   return (mb / 1024).toFixed(2) + " GB";
 }
 
-function demoDevice(): AndroidDevice {
+function previewDevice(): AndroidDevice | null {
+  if (previewConnected) {
+    return {
+      serial: "PREVIEW",
+      state: "connected",
+      manufacturer: "HONOR",
+      model: "HONOR 200",
+      androidVersion: "15",
+      batteryLevel: 84,
+      storageSummary: "81 GB / 256 GB",
+      whatsappInstalled: true,
+      whatsappBusinessInstalled: true
+    };
+  }
+
+  if (preview === "usb") {
+    return {
+      serial: "",
+      state: "usb_only",
+      manufacturer: "HONOR",
+      model: "HONOR 200",
+      androidVersion: "",
+      whatsappInstalled: false,
+      whatsappBusinessInstalled: false
+    };
+  }
+
+  return null;
+}
+
+function previewRead(variant: WhatsAppVariant): WhatsAppReadProbe {
   return {
-    serial: "PREVIEW",
-    state: "connected",
-    manufacturer: "HONOR",
-    model: "HONOR 200",
-    androidVersion: "15",
-    batteryLevel: 84,
-    storageSummary: "81 GB / 256 GB",
-    whatsappInstalled: true,
-    whatsappBusinessInstalled: false
+    variant,
+    installed: true,
+    readable: true,
+    databaseFiles: 1,
+    currentBytes: variant === "personal" ? 238_000_000 : 91_000_000,
+    chatCount: null
   };
 }
 
 export default function App() {
   const [page, setPage] = useState<Page>("backup");
-  const [device, setDevice] = useState<AndroidDevice | null>(preview ? demoDevice() : null);
-  const [diagnostic, setDiagnostic] = useState<AndroidDiagnostic | null>(null);
+  const [device, setDevice] = useState<AndroidDevice | null>(previewDevice());
+  const [diagnostic, setDiagnostic] = useState<AndroidDiagnostic | null>(
+    preview === "usb"
+      ? {
+          code: "adb_interface_missing",
+          adbAvailable: true,
+          adbServerRunning: true,
+          adbDeviceSeen: false,
+          adbInterfaceSeen: false,
+          adbPath: "",
+          windowsUsbSeen: true,
+          windowsDeviceName: "HONOR 200"
+        }
+      : null
+  );
   const [variant, setVariant] = useState<WhatsAppVariant>("personal");
   const [progress, setProgress] = useState<TransferProgress>(idle);
   const [running, setRunning] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [mirrorStarting, setMirrorStarting] = useState(false);
-  const [mirrorReady, setMirrorReady] = useState(!!preview);
+  const [mirrorStarting, setMirrorStarting] = useState(previewConnected);
+  const [mirrorReady, setMirrorReady] = useState(previewConnected);
+  const [mirrorFrame, setMirrorFrame] = useState<string | null>(null);
   const [result, setResult] = useState("");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(
-    preview === "update" ? { version: "0.7.0", url: "", sha256: "" } : null
+    preview === "update" ? { version: "0.8.0", url: "", sha256: "" } : null
   );
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [personalRead, setPersonalRead] = useState<WhatsAppReadProbe | null>(null);
-  const [businessRead, setBusinessRead] = useState<WhatsAppReadProbe | null>(null);
+  const [personalRead, setPersonalRead] = useState<WhatsAppReadProbe | null>(
+    previewConnected ? previewRead("personal") : null
+  );
+  const [businessRead, setBusinessRead] = useState<WhatsAppReadProbe | null>(
+    previewConnected ? previewRead("business") : null
+  );
   const [readingWhatsApp, setReadingWhatsApp] = useState(false);
+  const [showWireless, setShowWireless] = useState(false);
+  const [pairEndpoint, setPairEndpoint] = useState("");
+  const [pairCode, setPairCode] = useState("");
+  const [connectEndpoint, setConnectEndpoint] = useState("");
+  const [wirelessBusy, setWirelessBusy] = useState(false);
 
-  const mirrorRef = useRef<HTMLDivElement>(null);
+  const mirrorSession = useRef<number | null>(null);
   const syncBusy = useRef(false);
+
   const authorized = device?.state === "connected" && !!device.serial;
   const usbSeen = !!device || !!diagnostic?.windowsUsbSeen;
 
+  const selectedRead = variant === "personal" ? personalRead : businessRead;
   const backupSupported = useMemo(
-    () =>
-      authorized &&
-      (variant === "personal" ? device?.whatsappInstalled : device?.whatsappBusinessInstalled),
-    [authorized, device, variant]
+    () => authorized && !!selectedRead?.readable,
+    [authorized, selectedRead]
   );
-
-  function currentMirrorRect() {
-    const element = mirrorRef.current;
-    if (!element) return null;
-    const rect = element.getBoundingClientRect();
-    const scale = window.devicePixelRatio || 1;
-    return {
-      x: Math.round(rect.left * scale),
-      y: Math.round(rect.top * scale),
-      width: Math.max(1, Math.round(rect.width * scale)),
-      height: Math.max(1, Math.round(rect.height * scale))
-    };
-  }
 
   async function startMirror(serial: string) {
     if (preview) {
       setMirrorReady(true);
+      setMirrorStarting(false);
       return;
     }
 
-    const rect = currentMirrorRect();
-    if (!rect) return;
-
-    setMirrorStarting(true);
+    setMirrorFrame(null);
     setMirrorReady(false);
+    setMirrorStarting(true);
 
     try {
-      await backend.startLiveMirror(serial, rect);
-      setMirrorReady(true);
+      const session = await backend.startLiveMirror(serial);
+      mirrorSession.current = session;
     } catch (error) {
-      setMirrorReady(false);
-      setResult("تعذر تشغيل البث: " + translateBackendError(error));
-    } finally {
       setMirrorStarting(false);
+      setResult("تعذر تشغيل البث: " + translateBackendError(error));
     }
+  }
+
+  async function stopMirror() {
+    mirrorSession.current = null;
+    setMirrorFrame(null);
+    setMirrorReady(false);
+    setMirrorStarting(false);
+    if (!preview) await backend.stopLiveMirror().catch(() => undefined);
   }
 
   async function loadWhatsAppReadState() {
@@ -132,6 +177,19 @@ export default function App() {
     }
   }
 
+  async function acceptConnectedDevice(nextDevice: AndroidDevice) {
+    const changed = device?.serial !== nextDevice.serial;
+    setDevice(nextDevice);
+    setDiagnostic((current) =>
+      current
+        ? { ...current, code: "connected", adbDeviceSeen: true, adbInterfaceSeen: true }
+        : current
+    );
+
+    loadWhatsAppReadState();
+    if (changed || !mirrorReady) startMirror(nextDevice.serial);
+  }
+
   async function loadAuthorizedPhone() {
     if (syncBusy.current) return;
     syncBusy.current = true;
@@ -139,12 +197,7 @@ export default function App() {
     try {
       const nextDevice = await backend.detectDevice();
       if (nextDevice?.state === "connected" && nextDevice.serial) {
-        const changed = device?.serial !== nextDevice.serial;
-        setDevice(nextDevice);
-        window.setTimeout(() => loadWhatsAppReadState(), 120);
-        if (changed || !mirrorReady) {
-          window.setTimeout(() => startMirror(nextDevice.serial), 80);
-        }
+        await acceptConnectedDevice(nextDevice);
       }
     } finally {
       syncBusy.current = false;
@@ -158,44 +211,61 @@ export default function App() {
     setResult("");
 
     try {
-      await backend.stopLiveMirror().catch(() => undefined);
-      setMirrorReady(false);
-
+      await stopMirror();
       const nextDiagnostic = await backend.repairConnection();
       setDiagnostic(nextDiagnostic);
 
-      if (
-        nextDiagnostic.code === "connected" ||
-        nextDiagnostic.code === "unauthorized" ||
-        nextDiagnostic.code === "offline"
-      ) {
-        const nextDevice = await backend.detectDevice();
-        setDevice(nextDevice);
+      const nextDevice = await backend.detectDevice();
+      setDevice(nextDevice);
 
-        if (nextDevice?.state === "connected" && nextDevice.serial) {
-          window.setTimeout(() => {
-            startMirror(nextDevice.serial);
-            loadWhatsAppReadState();
-          }, 100);
-        }
-      } else if (nextDiagnostic.windowsUsbSeen) {
-        setDevice({
-          serial: "",
-          state: "usb_only",
-          manufacturer: "",
-          model: nextDiagnostic.windowsDeviceName || "Android",
-          androidVersion: "",
-          whatsappInstalled: false,
-          whatsappBusinessInstalled: false
-        });
+      if (nextDevice?.state === "connected" && nextDevice.serial) {
+        await acceptConnectedDevice(nextDevice);
       } else {
-        setDevice(null);
+        setPersonalRead(null);
+        setBusinessRead(null);
       }
     } catch (error) {
       setDevice(null);
+      setPersonalRead(null);
+      setBusinessRead(null);
       setResult(translateBackendError(error));
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function pairWireless() {
+    if (!pairEndpoint.trim() || !pairCode.trim() || wirelessBusy) return;
+    setWirelessBusy(true);
+    setResult("");
+    try {
+      await backend.pairWireless(pairEndpoint.trim(), pairCode.trim());
+      setResult("تم الاقتران. أدخل عنوان الاتصال الظاهر في شاشة التصحيح اللاسلكي.");
+    } catch (error) {
+      setResult("فشل الاقتران: " + translateBackendError(error));
+    } finally {
+      setWirelessBusy(false);
+    }
+  }
+
+  async function connectWireless() {
+    if (!connectEndpoint.trim() || wirelessBusy) return;
+    setWirelessBusy(true);
+    setResult("");
+    try {
+      await backend.connectWireless(connectEndpoint.trim());
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      const nextDevice = await backend.detectDevice();
+      if (nextDevice?.state === "connected" && nextDevice.serial) {
+        await acceptConnectedDevice(nextDevice);
+        setShowWireless(false);
+      } else {
+        setResult("تم الاتصال بالشبكة لكن ADB لم يجهز الهاتف بعد.");
+      }
+    } catch (error) {
+      setResult("فشل الاتصال اللاسلكي: " + translateBackendError(error));
+    } finally {
+      setWirelessBusy(false);
     }
   }
 
@@ -203,13 +273,43 @@ export default function App() {
     document.documentElement.lang = "ar";
     document.documentElement.dir = "rtl";
 
+    let unlistenFrame: (() => void) | undefined;
+    let unlistenMirrorStatus: (() => void) | undefined;
     let unlistenTransfer: (() => void) | undefined;
     let unlistenUpdate: (() => void) | undefined;
+
+    if (!preview) {
+      backend.onMirrorFrame((frame: MirrorFrame) => {
+        if (mirrorSession.current !== null && frame.session !== mirrorSession.current) return;
+        if (mirrorSession.current === null) mirrorSession.current = frame.session;
+        setMirrorFrame(frame.dataUrl);
+        setMirrorReady(true);
+        setMirrorStarting(false);
+      }).then((fn) => (unlistenFrame = fn)).catch(() => undefined);
+
+      backend.onMirrorStatus((status: MirrorStatus) => {
+        if (mirrorSession.current !== null && status.session !== mirrorSession.current) return;
+
+        if (status.state === "starting" || status.state === "connected") {
+          setMirrorStarting(true);
+        } else if (status.state === "streaming") {
+          setMirrorReady(true);
+          setMirrorStarting(false);
+        } else if (status.state === "error") {
+          setMirrorReady(false);
+          setMirrorStarting(false);
+          setMirrorFrame(null);
+          setResult("فشل البث: " + (status.detail || "خطأ غير معروف"));
+        } else if (status.state === "stopped") {
+          setMirrorReady(false);
+          setMirrorStarting(false);
+        }
+      }).then((fn) => (unlistenMirrorStatus = fn)).catch(() => undefined);
+    }
 
     backend.onProgress(setProgress).then((fn) => (unlistenTransfer = fn)).catch(() => undefined);
     backend.onUpdateProgress(setUpdateProgress).then((fn) => (unlistenUpdate = fn)).catch(() => undefined);
 
-    // Lightweight ADB watcher only. No PowerShell/PnP scan here.
     const watcher = preview ? undefined : window.setInterval(async () => {
       if (scanning || running || syncBusy.current) return;
       try {
@@ -217,59 +317,35 @@ export default function App() {
         if (peer?.state === "device") {
           if (!authorized || device?.serial !== peer.serial) await loadAuthorizedPhone();
         } else if (peer?.state === "unauthorized") {
-          setDevice((current) => current?.state === "connected" ? current : {
+          setDevice((current) => ({
             serial: peer.serial,
             state: "unauthorized",
-            manufacturer: "",
+            manufacturer: current?.manufacturer || "",
             model: current?.model || "Android",
             androidVersion: "",
             whatsappInstalled: false,
             whatsappBusinessInstalled: false
-          });
+          }));
         } else if (authorized && !peer) {
-          await backend.stopLiveMirror().catch(() => undefined);
-          setMirrorReady(false);
+          await stopMirror();
           setDevice(null);
           setPersonalRead(null);
           setBusinessRead(null);
         }
       } catch {
-        // Lightweight watcher is intentionally silent.
+        // Silent lightweight ADB watcher.
       }
-    }, 2500);
+    }, 2200);
 
     return () => {
       if (watcher) window.clearInterval(watcher);
+      unlistenFrame?.();
+      unlistenMirrorStatus?.();
       unlistenTransfer?.();
       unlistenUpdate?.();
       if (!preview) backend.stopLiveMirror().catch(() => undefined);
     };
-  }, [authorized, device?.serial, scanning, running, mirrorReady]);
-
-  useEffect(() => {
-    if (!authorized || preview || !mirrorReady) return;
-
-    const resize = () => {
-      const rect = currentMirrorRect();
-      if (rect) backend.resizeLiveMirror(rect).catch(() => undefined);
-    };
-
-    const observer = new ResizeObserver(resize);
-    if (mirrorRef.current) observer.observe(mirrorRef.current);
-    window.addEventListener("resize", resize);
-
-    let unlistenMoved: (() => void) | undefined;
-    getCurrentWindow().onMoved(() => resize()).then((fn) => (unlistenMoved = fn)).catch(() => undefined);
-
-    const timer = window.setTimeout(resize, 120);
-
-    return () => {
-      window.clearTimeout(timer);
-      observer.disconnect();
-      window.removeEventListener("resize", resize);
-      unlistenMoved?.();
-    };
-  }, [authorized, mirrorReady, page]);
+  }, [authorized, device?.serial, scanning, running]);
 
   async function checkUpdate() {
     if (preview || checkingUpdate) return;
@@ -312,6 +388,7 @@ export default function App() {
     try {
       const saved = await backend.backupWhatsApp(variant, destination);
       setResult("تم حفظ النسخة: " + saved);
+      await loadWhatsAppReadState();
     } catch (error) {
       setResult("فشل النسخ: " + translateBackendError(error));
     } finally {
@@ -330,7 +407,7 @@ export default function App() {
     try {
       const summary = await backend.inspectBackup(selected);
       const approved = await confirm(
-        "استعادة " + summary.databaseCount + " ملف محادثات إلى الهاتف؟",
+        "استعادة " + summary.databaseCount + " ملف قاعدة محادثات إلى الهاتف؟",
         { title: "تأكيد الاستعادة", kind: "warning" }
       );
       if (!approved) return;
@@ -345,7 +422,8 @@ export default function App() {
 
     try {
       const outcome = await backend.restoreWhatsApp(selected, variant);
-      setResult("تمت استعادة " + outcome.restoredFiles + " ملف محادثات.");
+      setResult("تمت استعادة " + outcome.restoredFiles + " ملف قاعدة محادثات.");
+      await loadWhatsAppReadState();
     } catch (error) {
       setResult("فشلت الاستعادة: " + translateBackendError(error));
     } finally {
@@ -358,49 +436,32 @@ export default function App() {
     : device?.state === "unauthorized"
       ? "بانتظار موافقتك"
       : usbSeen
-        ? "الهاتف موجود"
+        ? "USB فقط"
         : "غير متصل";
 
-  const mirrorMessage = authorized
-    ? "جارٍ تجهيز البث المباشر"
-    : device?.state === "unauthorized"
-      ? "وافق على رسالة تصحيح USB في الهاتف"
-      : diagnostic?.code === "adb_interface_missing"
-        ? "فعّل تصحيح USB في الهاتف"
-        : diagnostic?.code === "adb_interface_not_ready"
-          ? "افتح الهاتف ووافق على إذن USB"
-          : usbSeen
-            ? "اضغط فحص الهاتف"
-            : "وصّل الهاتف ثم اضغط فحص";
+  const connectionHint = device?.state === "unauthorized"
+    ? "افتح الهاتف واضغط سماح لرسالة تصحيح USB."
+    : diagnostic?.code === "adb_interface_missing"
+      ? "من الهاتف: خيارات المطور ← تصحيح USB."
+      : diagnostic?.code === "adb_interface_not_ready"
+        ? "افتح الهاتف ووافق على بصمة RSA."
+        : usbSeen
+          ? "USB يعمل، لكن Android لم يفتح ADB."
+          : "وصّل الهاتف بكابل بيانات.";
 
-  const adbLabel = authorized
-    ? "ADB جاهز"
-    : diagnostic?.adbInterfaceSeen
-      ? "ADB ينتظر الهاتف"
-      : usbSeen
-        ? "USB جاهز"
-        : "غير متصل";
+  function readLabel(read: WhatsAppReadProbe | null, installed?: boolean) {
+    if (read?.chatCount != null) return read.chatCount + " محادثة";
+    if (read?.readable) {
+      return "تمت القراءة • " + read.databaseFiles + " ملف • " + formatBytes(read.currentBytes);
+    }
+    if (readingWhatsApp) return "جارٍ قراءة البيانات...";
+    if (authorized && installed === false) return "غير مثبت";
+    if (authorized) return "لا توجد نسخة محلية";
+    return "بانتظار الاتصال";
+  }
 
-  const personalReadLabel = personalRead?.chatCount != null
-    ? personalRead.chatCount + " محادثة"
-    : personalRead?.readable
-      ? "تمت القراءة • " + formatBytes(personalRead.currentBytes)
-      : readingWhatsApp
-        ? "جارٍ قراءة البيانات..."
-        : authorized
-          ? "لا توجد نسخة محلية"
-          : "بانتظار ADB";
-
-  const businessReadLabel = businessRead?.chatCount != null
-    ? businessRead.chatCount + " محادثة"
-    : businessRead?.readable
-      ? "تمت القراءة • " + formatBytes(businessRead.currentBytes)
-      : readingWhatsApp
-        ? "جارٍ قراءة البيانات..."
-        : authorized
-          ? "لا توجد نسخة محلية"
-          : "بانتظار ADB";
-
+  const personalReadLabel = readLabel(personalRead, device?.whatsappInstalled);
+  const businessReadLabel = readLabel(businessRead, device?.whatsappBusinessInstalled);
   const actionDisabled = running || (page === "backup" ? !backupSupported : !authorized);
 
   return (
@@ -436,7 +497,7 @@ export default function App() {
                 ? "جارٍ الفحص..."
                 : "فحص التحديث"}
           </button>
-          <small>الإصدار 0.6.4</small>
+          <small>الإصدار 0.7.0</small>
         </div>
       </aside>
 
@@ -463,31 +524,32 @@ export default function App() {
           <div className="mirror-panel">
             <div className="mirror-head">
               <div>
-                <span>البث المباشر</span>
-                <strong>{device?.model || "هاتف Android"}</strong>
+                <span>شاشة الهاتف</span>
+                <strong>{device?.model || "Android"}</strong>
               </div>
               <div className={mirrorReady ? "live-badge on" : "live-badge"}>
                 <i />
-                {mirrorReady ? "LIVE" : mirrorStarting ? "جارٍ التشغيل" : adbLabel}
+                {mirrorReady ? "LIVE" : mirrorStarting ? "جارٍ بدء البث" : authorized ? "جاهز للبث" : "متوقف"}
               </div>
             </div>
 
             <div className="phone-stage">
               <div className="device-frame">
                 <div className="device-speaker" />
-                <div ref={mirrorRef} className="native-mirror-surface">
-                  {!mirrorReady && (
-                    <div className="mirror-placeholder">
-                      <Smartphone size={54} />
-                      <strong>{statusText}</strong>
-                      <span>{mirrorMessage}</span>
-                    </div>
-                  )}
-                  {preview && mirrorReady && (
+                <div className="native-mirror-surface">
+                  {mirrorFrame ? (
+                    <img className="mirror-image" src={mirrorFrame} alt="شاشة الهاتف المباشرة" />
+                  ) : previewConnected ? (
                     <div className="demo-live">
-                      <Maximize2 size={28} />
-                      <strong>معاينة البث المباشر</strong>
-                      <span>ستظهر شاشة هاتفك الحقيقية هنا</span>
+                      <Smartphone size={56} />
+                      <strong>البث المباشر</strong>
+                      <span>ستظهر شاشة الهاتف الفعلية هنا</span>
+                    </div>
+                  ) : (
+                    <div className="mirror-placeholder">
+                      <Smartphone size={56} />
+                      <strong>{authorized ? "جارٍ انتظار أول إطار" : statusText}</strong>
+                      <span>{authorized ? "H TRANS يجهز بث الشاشة داخل التطبيق" : connectionHint}</span>
                     </div>
                   )}
                 </div>
@@ -495,13 +557,63 @@ export default function App() {
             </div>
 
             <div className="device-info">
-              <span>{device?.model || "Android"}</span>
               {authorized && <span>Android {device?.androidVersion}</span>}
               {device?.batteryLevel != null && <span>{device.batteryLevel}٪ بطارية</span>}
+              {device?.storageSummary && <span>{device.storageSummary}</span>}
             </div>
           </div>
 
           <aside className="control-panel">
+            {!authorized && (
+              <div className="connection-card">
+                <div className="connection-title">
+                  <Link size={17} />
+                  <strong>اتصال Android</strong>
+                </div>
+                <p>{connectionHint}</p>
+
+                <div className="connection-actions">
+                  <button onClick={scanPhone} disabled={scanning}>
+                    <RefreshCw size={15} />
+                    إعادة الفحص
+                  </button>
+                  <button onClick={() => setShowWireless((value) => !value)}>
+                    <Wifi size={15} />
+                    اتصال لاسلكي
+                  </button>
+                </div>
+
+                {showWireless && (
+                  <div className="wireless-box">
+                    <div className="field-row">
+                      <input
+                        value={pairEndpoint}
+                        onChange={(event) => setPairEndpoint(event.target.value)}
+                        placeholder="عنوان الاقتران IP:PORT"
+                        dir="ltr"
+                      />
+                      <input
+                        value={pairCode}
+                        onChange={(event) => setPairCode(event.target.value)}
+                        placeholder="رمز الاقتران"
+                        dir="ltr"
+                      />
+                      <button onClick={pairWireless} disabled={wirelessBusy}>اقتران</button>
+                    </div>
+                    <div className="field-row connect-row">
+                      <input
+                        value={connectEndpoint}
+                        onChange={(event) => setConnectEndpoint(event.target.value)}
+                        placeholder="عنوان الاتصال IP:PORT"
+                        dir="ltr"
+                      />
+                      <button onClick={connectWireless} disabled={wirelessBusy}>اتصال</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <span className="control-kicker">البيانات</span>
             <h2>واتساب</h2>
 
@@ -512,7 +624,7 @@ export default function App() {
                   <strong>واتساب</strong>
                   {personalRead?.readable && <em>مقروء</em>}
                 </div>
-                <small>{device?.whatsappInstalled === false && authorized ? "غير مثبت" : personalReadLabel}</small>
+                <small>{personalReadLabel}</small>
               </div>
             </button>
 
@@ -523,7 +635,7 @@ export default function App() {
                   <strong>واتساب للأعمال</strong>
                   {businessRead?.readable && <em>مقروء</em>}
                 </div>
-                <small>{device?.whatsappBusinessInstalled === false && authorized ? "غير مثبت" : businessReadLabel}</small>
+                <small>{businessReadLabel}</small>
               </div>
             </button>
 

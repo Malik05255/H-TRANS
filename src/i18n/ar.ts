@@ -92,12 +92,12 @@ const diagnosticMap: Record<AndroidDiagnosticCode, { title: string; detail: stri
     detail: "USB يعمل لكن ADB غير جاهز."
   },
   adb_interface_not_ready: {
-    title: "بانتظار إذن ADB",
-    detail: "افتح الهاتف ووافق على رسالة تصحيح USB."
+    title: "واجهة ADB موجودة",
+    detail: "افتح الهاتف ووافق على رسالة السماح بتصحيح USB."
   },
   adb_interface_missing: {
-    title: "فعّل تصحيح USB",
-    detail: "Windows يرى الهاتف لكن واجهة ADB غير ظاهرة."
+    title: "USB فقط",
+    detail: "Windows يرى الهاتف كجهاز ملفات، لكن Android لم يفعّل واجهة ADB. فعّل تصحيح USB أو استخدم التصحيح اللاسلكي."
   },
   no_usb_device: {
     title: "لم يتم اكتشاف هاتف عبر USB",

@@ -42,6 +42,20 @@ export interface AndroidDiagnostic {
   rawAdb?: string | null;
 }
 
+export interface MirrorFrame {
+  session: number;
+  dataUrl: string;
+  width: number;
+  height: number;
+  sequence: number;
+}
+
+export interface MirrorStatus {
+  session: number;
+  state: "starting" | "connected" | "streaming" | "stopped" | "error";
+  detail?: string | null;
+}
+
 export interface TransferProgress {
   operation: "backup" | "restore";
   percent: number;
