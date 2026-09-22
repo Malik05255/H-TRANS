@@ -118,7 +118,7 @@ export default function App() {
   }
 
   async function loadWhatsAppReadState() {
-    if (preview || !authorized) return;
+    if (preview) return;
     setReadingWhatsApp(true);
     try {
       const [personal, business] = await Promise.all([
