@@ -21,6 +21,7 @@ export type AndroidDiagnosticCode =
   | "connected"
   | "unauthorized"
   | "offline"
+  | "usb_seen_no_adb"
   | "adb_interface_not_ready"
   | "adb_interface_missing"
   | "no_usb_device"

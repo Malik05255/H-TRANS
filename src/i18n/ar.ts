@@ -88,14 +88,16 @@ const diagnosticMap: Record<AndroidDiagnosticCode, { title: string; detail: stri
     detail: "أعد توصيل الكابل ثم استخدم زر إعادة تشغيل ADB."
   },
   usb_seen_no_adb: {
-    title: "USB يعمل لكن الهاتف غير ظاهر في ADB",
-    detail: "Windows يرى الهاتف، لكن Android لم يفتح قناة المطور بعد.",
-    steps: [
-      "افتح الإعدادات > حول الهاتف واضغط رقم الإصدار 7 مرات.",
-      "افتح النظام والتحديثات > خيارات المطور > فعّل تصحيح USB.",
-      "في HONOR فعّل «السماح بتصحيح ADB في وضع الشحن فقط» إن ظهر الخيار.",
-      "افصل الكابل وأعد توصيله ثم وافق على بصمة RSA."
-    ]
+    title: "الهاتف موجود",
+    detail: "USB يعمل لكن ADB غير جاهز."
+  },
+  adb_interface_not_ready: {
+    title: "بانتظار إذن ADB",
+    detail: "افتح الهاتف ووافق على رسالة تصحيح USB."
+  },
+  adb_interface_missing: {
+    title: "فعّل تصحيح USB",
+    detail: "Windows يرى الهاتف لكن واجهة ADB غير ظاهرة."
   },
   no_usb_device: {
     title: "لم يتم اكتشاف هاتف عبر USB",
